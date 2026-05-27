@@ -38,14 +38,3 @@ Treat `src/others/guide.mdx` as the source of truth for content rules, and use `
 
 - If everything looks good, **APPROVE** the PR.
 - If there are issues that must be fixed, **REQUEST CHANGES** and clearly explain each problem.
-
-## Re-request Instructions
-
-When requesting changes, always include the following message at the end of your review:
-
-```
----
-修改完成后，你可以通过以下方式重新请求 review：
-- 在 PR 评论中 @claude 并说明修改内容
-- 点击 reviewer 旁边的 🔄 (Re-request review) 按钮
-```
