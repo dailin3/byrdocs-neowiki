@@ -1,0 +1,976 @@
+<!DOCTYPE html><html lang="zh"> <head><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="apple-touch-icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.44/dist/katex.min.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="generator" content="Astro v6.1.5"><meta name="description" content="BYR Docs 维基真题收录北京邮电大学近年试题，是一个开放、共建、共享的维基网站。"><meta name="keywords" content="北邮,北京邮电大学,考试题目,维基"><meta name="author" content="BYR Docs"><script>
+      const themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
+      const applyTheme = () => {
+        const resolvedTheme = themeMedia.matches ? "dark" : "light";
+        const isDark = resolvedTheme === "dark";
+        document.documentElement.classList.toggle("dark", isDark);
+        document.documentElement.style.colorScheme = resolvedTheme;
+      };
+      applyTheme();
+      themeMedia.addEventListener("change", applyTheme);
+    </script><script>
+          (() => {
+            const storageKey = "exam-toc-desktop-collapsed";
+            let collapsed = false;
+
+            try {
+              collapsed = window.localStorage.getItem(storageKey) === "true";
+            } catch {}
+
+            document.documentElement.dataset.examTocDesktop = collapsed
+              ? "collapsed"
+              : "expanded";
+          })();
+        </script><script>
+      const examStateStorageKeyPrefix = "exam-state:";
+      const examStateTtlMs = 12 * 60 * 60 * 1000;
+      const examStateChangeEvent = "examstatechange";
+      const examStateSetAllEvent = "examsetall";
+      const createEmptyExamState = () => ({
+        blanks: {},
+        solutions: {},
+        choices: {},
+      });
+      const isRecord = (value) =>
+        value !== null && typeof value === "object" && !Array.isArray(value);
+      const normalizeChoiceState = (value) => ({
+        selected: Array.isArray(value?.selected)
+          ? value.selected.filter((item) => typeof item === "string")
+          : [],
+        revealed: value?.revealed === true,
+        mode:
+          value?.mode === "answers" || value?.mode === "checked"
+            ? value.mode
+            : undefined,
+      });
+      const normalizeExamState = (value) => {
+        const state = createEmptyExamState();
+        if (!isRecord(value)) return state;
+        if (isRecord(value.blanks))
+          state.blanks = Object.fromEntries(
+            Object.entries(value.blanks).filter(
+              ([, revealed]) => revealed === true,
+            ),
+          );
+        if (isRecord(value.solutions))
+          state.solutions = Object.fromEntries(
+            Object.entries(value.solutions).filter(([, open]) => open === true),
+          );
+        if (isRecord(value.choices))
+          state.choices = Object.fromEntries(
+            Object.entries(value.choices)
+              .map(([key, choiceState]) => [
+                key,
+                normalizeChoiceState(choiceState),
+              ])
+              .filter(
+                ([, choiceState]) =>
+                  choiceState.revealed === true ||
+                  choiceState.selected.length > 0,
+              ),
+          );
+        return state;
+      };
+      const isExamStateEmpty = (state) =>
+        Object.keys(state.blanks).length === 0 &&
+        Object.keys(state.solutions).length === 0 &&
+        Object.keys(state.choices).length === 0;
+      const getExamStateStorageKey = () =>
+        `${examStateStorageKeyPrefix}${window.location.pathname}`;
+      const removeExamState = () => {
+        try {
+          window.localStorage.removeItem(getExamStateStorageKey());
+        } catch {
+          return;
+        }
+      };
+      const readExamState = () => {
+        try {
+          const raw = window.localStorage.getItem(getExamStateStorageKey());
+          if (!raw) return createEmptyExamState();
+          const parsed = JSON.parse(raw);
+          if (
+            !isRecord(parsed) ||
+            typeof parsed.expiresAt !== "number" ||
+            parsed.expiresAt < Date.now()
+          ) {
+            removeExamState();
+            return createEmptyExamState();
+          }
+          return normalizeExamState(parsed);
+        } catch {
+          removeExamState();
+          return createEmptyExamState();
+        }
+      };
+      const writeExamState = (state) => {
+        const normalizedState = normalizeExamState(state);
+        if (isExamStateEmpty(normalizedState)) {
+          removeExamState();
+          return normalizedState;
+        }
+        try {
+          window.localStorage.setItem(
+            getExamStateStorageKey(),
+            JSON.stringify({
+              expiresAt: Date.now() + examStateTtlMs,
+              ...normalizedState,
+            }),
+          );
+        } catch {
+          return normalizedState;
+        }
+        return normalizedState;
+      };
+      const updateExamState = (updater) =>
+        writeExamState(updater(readExamState()) ?? createEmptyExamState());
+      const getRevealableExamChoiceGroups = () => [
+        ...document.querySelectorAll(".exam-choices[data-has-answer='true']"),
+      ];
+      const hasRevealable = () =>
+        document.querySelector(
+          ".exam-blank[aria-pressed], .exam-solution, .exam-choices[data-has-answer='true']",
+        ) !== null;
+      const getAllShown = () => {
+        if (!hasRevealable()) return false;
+        const blanks = [
+          ...document.querySelectorAll(".exam-blank[aria-pressed]"),
+        ];
+        const solutions = [...document.querySelectorAll(".exam-solution")];
+        const choiceGroups = getRevealableExamChoiceGroups();
+        return (
+          blanks.every(
+            (blank) => blank.getAttribute("aria-pressed") === "true",
+          ) &&
+          solutions.every(
+            (solution) =>
+              solution instanceof HTMLDetailsElement && solution.open,
+          ) &&
+          choiceGroups.every(
+            (group) => group.getAttribute("data-revealed") === "true",
+          )
+        );
+      };
+      const syncExamState = () =>
+        window.dispatchEvent(
+          new CustomEvent(examStateChangeEvent, {
+            detail: {
+              allShown: getAllShown(),
+              hasRevealable: hasRevealable(),
+            },
+          }),
+        );
+      const setAllRevealed = (revealed) =>
+        window.dispatchEvent(
+          new CustomEvent(examStateSetAllEvent, {
+            detail: { revealed },
+          }),
+        );
+      window.__examState = {
+        read: readExamState,
+        update: updateExamState,
+        sync: syncExamState,
+        toggleAll: () => setAllRevealed(!getAllShown()),
+        getAllShown,
+        hasRevealable,
+        events: {
+          change: examStateChangeEvent,
+          setAll: examStateSetAllEvent,
+        },
+      };
+    </script><title>25-26-1-图论及其应用-期末 - BYR Docs 维基真题</title><style>.related-exams[data-astro-cid-a6434jl4]>summary[data-astro-cid-a6434jl4]::-webkit-details-marker{display:none}.related-exams[data-astro-cid-a6434jl4]>summary[data-astro-cid-a6434jl4]::marker{content:""}.related-exams[data-astro-cid-a6434jl4][open]>summary[data-astro-cid-a6434jl4]{border-bottom:1px solid rgb(226 232 240)}.related-exams[data-astro-cid-a6434jl4][open] .related-exams-chevron[data-astro-cid-a6434jl4]{transform:rotate(180deg)}.dark .related-exams[data-astro-cid-a6434jl4][open]>summary[data-astro-cid-a6434jl4]{border-bottom-color:#1e293b}#examAnswersToggle [data-exam-toggle-icon]{display:none}#examAnswersToggle[data-state=hidden] [data-exam-toggle-icon=show],#examAnswersToggle[data-state=shown] [data-exam-toggle-icon=hide]{display:block}#backToTop{opacity:0;pointer-events:none;transition:opacity .2s ease}#backToTop.is-visible{opacity:1;pointer-events:auto}@media print{@page{margin:2cm 1.5cm}#examToolbar{display:none!important}nav,footer{display:none!important}.exam-blank{background:transparent!important;min-width:0!important}.exam-blank-placeholder{display:none!important}.exam-blank-answer{visibility:visible!important}.exam-blank[aria-pressed=true].exam-blank,.exam-blank[aria-pressed=false].exam-blank{background:transparent!important;box-shadow:0 1px #999!important;border-radius:0!important}.exam-solution{break-inside:avoid;border-radius:12px!important;border:1.5px solid #ccc!important}.exam-solution[open],.exam-solution:not([open]){overflow:visible!important}.exam-solution-summary{display:none!important}.exam-solution-content{display:block!important;padding:1em 1.2em!important}.exam-choices .exam-choice-option[data-answer=true]{outline:1px solid #000!important;outline-offset:-2px;border-radius:8px!important}.exam-choices .exam-choice-option.is-correct .exam-choice-indicator,.exam-choices .exam-choice-option[data-answer=true] .exam-choice-indicator{border-color:#000!important;border-width:2px!important}.exam-choices .exam-choice-option.is-correct .exam-choice-indicator:after,.exam-choices .exam-choice-option[data-answer=true] .exam-choice-indicator:after{background:#000!important;content:""!important;inset:1.5px!important;position:absolute!important}.exam-choices.single .exam-choice-option[data-answer=true] .exam-choice-indicator:after{border-radius:50%!important}.exam-choices-submit{display:none!important}.exam-choice-option{border-color:transparent!important;box-shadow:none!important;padding:.2em .5em!important}.print-footer{display:block!important;margin-top:2em;padding-top:1em;border-top:1px solid #ccc;font-size:.85em;color:#666;line-height:1.8}.print-footer a{color:#444}}
+</style>
+<link rel="stylesheet" href="/byrdocs-neowiki/_astro/exam.Dqi_d8wD.css">
+<link rel="stylesheet" href="/byrdocs-neowiki/_astro/Layout.B7MUkrao.css"></head> <body> <script>
+      document.addEventListener(
+        "click",
+        (e) => {
+          const a = e.target.closest("a[href]");
+          if (!a) return;
+          const href = a.getAttribute("href");
+          if (href && /^https?:\/\//.test(href)) {
+            a.setAttribute("target", "_blank");
+            a.setAttribute("rel", "noopener noreferrer");
+          }
+        },
+        true,
+      );
+    </script> <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        document.querySelectorAll(".astro-code").forEach((pre) => {
+          const wrapper = document.createElement("div");
+          wrapper.className = "code-block-wrapper";
+          pre.parentNode.insertBefore(wrapper, pre);
+          wrapper.appendChild(pre);
+
+          const toolbar = document.createElement("div");
+          toolbar.className = "code-toolbar";
+
+          const wrapBtn = document.createElement("button");
+          wrapBtn.type = "button";
+          wrapBtn.title = "切换自动换行";
+          wrapBtn.innerHTML =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M3 12h15a3 3 0 1 1 0 6h-4"/><polyline points="13 16 11 18 13 20"/><path d="M3 18h4"/></svg>';
+          wrapBtn.addEventListener("click", () => {
+            const isWrapped = pre.style.whiteSpace === "pre-wrap";
+            pre.style.whiteSpace = isWrapped ? "" : "pre-wrap";
+            pre.style.wordBreak = isWrapped ? "" : "break-all";
+            wrapBtn.style.color = isWrapped ? "" : "#4ade80";
+          });
+
+          const copyBtn = document.createElement("button");
+          copyBtn.type = "button";
+          copyBtn.title = "复制代码";
+          const copyIcon =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+          const checkIcon =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+          copyBtn.innerHTML = copyIcon;
+          copyBtn.addEventListener("click", () => {
+            const code = pre.querySelector("code");
+            const text = code ? code.textContent : pre.textContent;
+            navigator.clipboard.writeText(text || "").then(() => {
+              copyBtn.innerHTML = checkIcon;
+              copyBtn.classList.add("is-copied");
+              toolbar.classList.add("is-active");
+              setTimeout(() => {
+                copyBtn.innerHTML = copyIcon;
+                copyBtn.classList.remove("is-copied");
+                toolbar.classList.remove("is-active");
+              }, 2000);
+            });
+          });
+
+          toolbar.appendChild(wrapBtn);
+          toolbar.appendChild(copyBtn);
+          wrapper.appendChild(toolbar);
+        });
+      });
+    </script> <div class="layout-shell flex min-h-screen flex-col" data-has-exam-toc="true"> <nav class="relative border-b border-slate-200/80 bg-white/85 backdrop-blur dark:border-slate-800 dark:bg-slate-950/80 sticky top-0 z-40" data-header-nav data-page-title-enabled="true" data-title-state="site" data-astro-cid-3ef6ksr2> <div class="layout-container mx-auto flex w-full items-center gap-4 px-4 py-4 sm:px-6 lg:px-8" data-astro-cid-3ef6ksr2> <a class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm no-underline transition hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700" href="/" title="回到首页" data-astro-cid-3ef6ksr2> <img alt="BYR Docs" class="h-7 w-7" src="/favicon.svg" data-astro-cid-3ef6ksr2> </a> <div class="relative min-w-0 flex-1" data-astro-cid-3ef6ksr2> <a class="block truncate text-lg font-semibold tracking-tight text-slate-950 no-underline transition-[opacity,transform] duration-200 hover:text-slate-950 sm:text-2xl dark:text-white dark:hover:text-white" data-header-site-title href="/" data-astro-cid-3ef6ksr2>BYR Docs 维基真题</a> <span aria-hidden="true" class="pointer-events-none absolute inset-0 block truncate text-lg font-semibold tracking-tight text-slate-950 opacity-0 transition-[opacity,transform] duration-200 sm:text-2xl dark:text-white" data-header-page-title data-astro-cid-3ef6ksr2> 25-26-1-图论及其应用-期末 </span> </div> <a class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm no-underline transition hover:border-slate-300 hover:text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-slate-700 dark:hover:text-slate-200" href="https://github.com/byrdocs/byrdocs-wiki-internal" aria-label="在 GitHub 上查看 BYR Docs 维基真题仓库" title="GitHub" target="_blank" rel="noopener noreferrer" data-astro-cid-3ef6ksr2> <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" data-astro-cid-3ef6ksr2><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" data-astro-cid-3ef6ksr2></path></svg> </a> </div> </nav> <main class="layout-container mx-auto flex w-full flex-1 px-4 py-6 sm:px-6 lg:px-8 xl:px-16"> <article class="wiki-content min-w-0 flex-1"> <h1 data-page-heading>25-26-1-图论及其应用-期末</h1>  <div class="exam-page-layout"> <aside class="exam-toc-shell" id="examTocShell" data-collapsed="false"><div class="exam-toc-panel"><nav class="exam-toc-nav" id="examTocNav" aria-label="试题目录"> <ol class="exam-toc-list"> <li class="exam-toc-item" data-slug="二8分" data-path="二8分" data-depth="2"> <div class="exam-toc-row">  <a class="exam-toc-link exam-toc-link-level-1" href="#二8分" data-slug="二8分" data-path="二8分" data-depth="2"> <span class="exam-toc-link-label">二（8分）</span> </a> </div>  </li><li class="exam-toc-item" data-slug="三10分" data-path="三10分" data-depth="2"> <div class="exam-toc-row">  <a class="exam-toc-link exam-toc-link-level-1" href="#三10分" data-slug="三10分" data-path="三10分" data-depth="2"> <span class="exam-toc-link-label">三（10分）</span> </a> </div>  </li><li class="exam-toc-item" data-slug="四12分" data-path="四12分" data-depth="2"> <div class="exam-toc-row">  <a class="exam-toc-link exam-toc-link-level-1" href="#四12分" data-slug="四12分" data-path="四12分" data-depth="2"> <span class="exam-toc-link-label">四（12分）</span> </a> </div>  </li> </ol> </nav></div><button class="exam-toc-desktop-trigger inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-r-xl border border-slate-200 border-l-0 bg-white text-slate-500 shadow-sm transition hover:border-slate-300 hover:text-slate-700 dark:border-slate-800 dark:border-l-0 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-slate-700 dark:hover:text-slate-200" id="examTocDesktopToggle" type="button" aria-label="展开目录侧边栏" aria-expanded="true"><svg aria-hidden="true" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h16"></path></svg></button></aside><div class="exam-toc-mobile" id="examTocMobile" data-open="false"><button class="exam-toc-mobile-backdrop" id="examTocMobileBackdrop" type="button" aria-label="关闭目录"></button><div class="exam-toc-mobile-panel" id="examTocMobilePanel"><div class="exam-toc-mobile-header"><p class="exam-toc-mobile-title">目录</p></div><nav class="exam-toc-nav exam-toc-nav-mobile" id="examTocMobileNav" aria-label="试题目录"> <ol class="exam-toc-list"> <li class="exam-toc-item" data-slug="二8分" data-path="二8分" data-depth="2"> <div class="exam-toc-row">  <a class="exam-toc-link exam-toc-link-level-1" href="#二8分" data-slug="二8分" data-path="二8分" data-depth="2"> <span class="exam-toc-link-label">二（8分）</span> </a> </div>  </li><li class="exam-toc-item" data-slug="三10分" data-path="三10分" data-depth="2"> <div class="exam-toc-row">  <a class="exam-toc-link exam-toc-link-level-1" href="#三10分" data-slug="三10分" data-path="三10分" data-depth="2"> <span class="exam-toc-link-label">三（10分）</span> </a> </div>  </li><li class="exam-toc-item" data-slug="四12分" data-path="四12分" data-depth="2"> <div class="exam-toc-row">  <a class="exam-toc-link exam-toc-link-level-1" href="#四12分" data-slug="四12分" data-path="四12分" data-depth="2"> <span class="exam-toc-link-label">四（12分）</span> </a> </div>  </li> </ol> </nav></div></div><script>
+  var initExamToc = function() {
+    var tocShell = document.getElementById("examTocShell");
+    var tocNav = document.getElementById("examTocNav");
+    var mobileRoot = document.getElementById("examTocMobile");
+    var mobilePanel = document.getElementById("examTocMobilePanel");
+    var mobileBackdrop = document.getElementById("examTocMobileBackdrop");
+    var mobileToggle = document.getElementById("examTocMobileToggle");
+
+    if (
+      !(tocShell instanceof HTMLElement) &&
+      !(mobileRoot instanceof HTMLElement)
+    ) {
+      return;
+    }
+
+    var tocLinks = Array.from(
+      document.querySelectorAll(".exam-toc-link[data-slug]"),
+    ).filter(function(link) {
+      return link instanceof HTMLAnchorElement;
+    });
+    var desktopItems = Array.from(
+      tocShell?.querySelectorAll(".exam-toc-item[data-slug]") || [],
+    ).filter(function(item) {
+      return item instanceof HTMLElement;
+    });
+    var mobileItems = Array.from(
+      mobileRoot?.querySelectorAll(".exam-toc-item[data-slug]") || [],
+    ).filter(function(item) {
+      return item instanceof HTMLElement;
+    });
+    var mobileBranchButtons = Array.from(
+      mobileRoot?.querySelectorAll(".exam-toc-branch-toggle[data-branch-toggle]") ||
+        [],
+    ).filter(function(button) {
+      return button instanceof HTMLButtonElement;
+    });
+
+    var setMobileOpen = function(open) {
+      if (!(mobileRoot instanceof HTMLElement))
+        return;
+
+      mobileRoot.dataset.open = open ? "true" : "false";
+
+      if (mobileToggle instanceof HTMLButtonElement) {
+        mobileToggle.setAttribute("aria-expanded", String(open));
+        mobileToggle.setAttribute("aria-label", open ? "隐藏目录" : "显示目录");
+      }
+    };
+    var syncDesktopVisibility = function() {
+      if (!(tocShell instanceof HTMLElement))
+        return;
+
+      var collapsed =
+        document.documentElement.dataset.examTocDesktop === "collapsed";
+      tocShell.dataset.collapsed = collapsed ? "true" : "false";
+      if (tocNav instanceof HTMLElement) {
+        tocNav.setAttribute("aria-hidden", String(collapsed));
+      }
+    };
+
+    var setBranchExpanded = function(items, buttons, slug, expanded) {
+      items.forEach(function(item) {
+        if (
+          !(item instanceof HTMLElement) ||
+          item.dataset.slug !== slug ||
+          item.querySelector(".exam-toc-children") === null
+        ) {
+          return;
+        }
+
+        item.dataset.expanded = expanded ? "true" : "false";
+      });
+
+      buttons.forEach(function(button) {
+        if (
+          !(button instanceof HTMLButtonElement) ||
+          button.dataset.branchToggle !== slug
+        ) {
+          return;
+        }
+
+        button.setAttribute("aria-expanded", String(expanded));
+      });
+    };
+    var setAllDesktopBranchesExpanded = function() {
+      desktopItems.forEach(function(item) {
+        if (
+          !(item instanceof HTMLElement) ||
+          item.querySelector(".exam-toc-children") === null
+        ) {
+          return;
+        }
+
+        item.dataset.expanded = "true";
+      });
+    };
+
+    syncDesktopVisibility();
+    setMobileOpen(false);
+    setAllDesktopBranchesExpanded();
+
+    var mobileManualState = {};
+    var mobileAutoExpanded = {};
+
+    var syncMobileBranch = function(slug) {
+      var manual = mobileManualState[slug];
+      var auto = mobileAutoExpanded[slug] || false;
+      var expanded;
+      if (manual === false) {
+        expanded = false;
+      } else if (manual === true || auto) {
+        expanded = true;
+      } else {
+        expanded = false;
+      }
+      setBranchExpanded(mobileItems, mobileBranchButtons, slug, expanded);
+    };
+
+    var syncAllMobileBranches = function() {
+      mobileItems.forEach(function(item) {
+        if (!(item instanceof HTMLElement) || !item.dataset.slug)
+          return;
+        if (item.querySelector(".exam-toc-children") === null)
+          return;
+        syncMobileBranch(item.dataset.slug);
+      });
+    };
+
+    mobileItems.forEach(function(item) {
+      if (!(item instanceof HTMLElement) || !item.dataset.slug)
+        return;
+      var initialExpanded = item.dataset.expanded === "true";
+      if (initialExpanded) {
+        mobileManualState[item.dataset.slug] = true;
+      }
+      setBranchExpanded(
+        mobileItems,
+        mobileBranchButtons,
+        item.dataset.slug,
+        initialExpanded,
+      );
+    });
+    window.addEventListener("examtocdesktopchange", syncDesktopVisibility);
+
+    mobileToggle?.addEventListener("click", function(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      setMobileOpen(mobileRoot?.dataset.open !== "true");
+    });
+
+    mobileBackdrop?.addEventListener("click", function() {
+      setMobileOpen(false);
+    });
+
+    mobilePanel?.addEventListener("click", function(event) {
+      event.stopPropagation();
+    });
+
+    document.addEventListener("click", function(event) {
+      if (!(mobileRoot instanceof HTMLElement) || mobileRoot.dataset.open !== "true")
+        return;
+      if (mobilePanel instanceof HTMLElement && mobilePanel.contains(event.target))
+        return;
+      if (mobileToggle instanceof HTMLElement && mobileToggle.contains(event.target))
+        return;
+      setMobileOpen(false);
+    });
+
+    document.addEventListener("keydown", function(event) {
+      if (event.key === "Escape")
+        setMobileOpen(false);
+    });
+
+    mobileBranchButtons.forEach(function(button) {
+      if (!(button instanceof HTMLButtonElement))
+        return;
+
+      button.addEventListener("click", function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        var slug = button.dataset.branchToggle;
+        if (!slug)
+          return;
+
+        var matchingItem = mobileItems.find(function(item) {
+          return (
+            item instanceof HTMLElement &&
+            item.dataset.slug === slug &&
+            item.querySelector(".exam-toc-children") !== null
+          );
+        });
+
+        var isCurrentlyExpanded = matchingItem?.dataset.expanded === "true";
+        mobileManualState[slug] = !isCurrentlyExpanded;
+        syncMobileBranch(slug);
+      });
+    });
+
+    if (tocLinks.length === 0)
+      return;
+
+    var seenSlugs = {};
+    var headingEntries = tocLinks
+      .map(function(link) {
+        if (!(link instanceof HTMLAnchorElement))
+          return null;
+
+        var slug = link.dataset.slug;
+        if (!slug || seenSlugs[slug])
+          return null;
+
+        var heading = document.getElementById(slug);
+        if (!(heading instanceof HTMLElement))
+          return null;
+
+        seenSlugs[slug] = true;
+        return {
+          slug: slug,
+          path: (link.dataset.path || slug).split("||").filter(Boolean),
+          heading: heading,
+        };
+      })
+      .filter(function(entry) {
+        return entry !== null;
+      });
+
+    if (headingEntries.length === 0)
+      return;
+
+    var activationOffset = 140;
+    var headingEntriesBySlug = {};
+    headingEntries.forEach(function(entry) {
+      headingEntriesBySlug[entry.slug] = entry;
+    });
+    var lastActiveSlug = "";
+    var programmaticScrollState = null;
+    var programmaticScrollFrame = 0;
+    var applyTocState = function(activeEntry) {
+      var activeSlug = activeEntry.slug;
+      var activePath = activeEntry.path;
+
+      tocLinks.forEach(function(link) {
+        if (!(link instanceof HTMLAnchorElement))
+          return;
+
+        var slug = link.dataset.slug || "";
+        var isActive = slug === activeSlug;
+        var isInPath = activePath.indexOf(slug) >= 0;
+
+        link.classList.toggle("is-active", isActive);
+        link.classList.toggle("is-in-path", isInPath && !isActive);
+
+        if (isActive)
+          link.setAttribute("aria-current", "location");
+        else
+          link.removeAttribute("aria-current");
+      });
+
+      setAllDesktopBranchesExpanded();
+
+      var newAutoExpanded = {};
+      activePath.forEach(function(slug) {
+        newAutoExpanded[slug] = true;
+      });
+      // Clear manual state for slugs whose auto state changed
+      mobileItems.forEach(function(item) {
+        if (!(item instanceof HTMLElement) || !item.dataset.slug)
+          return;
+        if (item.querySelector(".exam-toc-children") === null)
+          return;
+        var slug = item.dataset.slug;
+        var wasAuto = mobileAutoExpanded[slug] || false;
+        var isAuto = newAutoExpanded[slug] || false;
+        if (wasAuto !== isAuto) {
+          delete mobileManualState[slug];
+        }
+      });
+      mobileAutoExpanded = newAutoExpanded;
+      syncAllMobileBranches();
+
+      if (activeSlug !== lastActiveSlug) {
+        tocLinks.forEach(function(link) {
+          if (
+            !(link instanceof HTMLAnchorElement) ||
+            link.dataset.slug !== activeSlug
+          ) {
+            return;
+          }
+
+          var inMobile = link.closest(".exam-toc-mobile") !== null;
+          var inDesktop = link.closest(".exam-toc-shell") !== null;
+
+          if (inMobile && mobileRoot?.dataset.open !== "true")
+            return;
+          if (inDesktop && tocShell?.dataset.collapsed === "true")
+            return;
+
+          link.scrollIntoView({
+            block: "nearest",
+            inline: "nearest",
+          });
+        });
+
+        lastActiveSlug = activeSlug;
+      }
+    };
+    var syncTocState = function() {
+      var activeEntry = headingEntries[0];
+
+      for (var i = 0; i < headingEntries.length; i++) {
+        if (headingEntries[i].heading.getBoundingClientRect().top <= activationOffset)
+          activeEntry = headingEntries[i];
+        else
+          break;
+      }
+
+      applyTocState(activeEntry);
+    };
+    var clearProgrammaticScroll = function() {
+      if (programmaticScrollFrame) {
+        window.cancelAnimationFrame(programmaticScrollFrame);
+        programmaticScrollFrame = 0;
+      }
+      programmaticScrollState = null;
+    };
+    var watchProgrammaticScroll = function() {
+      if (!programmaticScrollState || programmaticScrollFrame)
+        return;
+
+      programmaticScrollFrame = window.requestAnimationFrame(function() {
+        programmaticScrollFrame = 0;
+
+        if (!programmaticScrollState)
+          return;
+
+        var elapsed = Date.now() - programmaticScrollState.startedAt;
+        var distance = Math.abs(
+          programmaticScrollState.heading.getBoundingClientRect().top -
+            activationOffset,
+        );
+
+        if (distance <= 6 || elapsed >= 1200) {
+          clearProgrammaticScroll();
+          requestSync();
+          return;
+        }
+
+        watchProgrammaticScroll();
+      });
+    };
+    var syncFrame = 0;
+    var requestSync = function() {
+      if (programmaticScrollState) {
+        watchProgrammaticScroll();
+        return;
+      }
+      if (syncFrame)
+        return;
+
+      syncFrame = window.requestAnimationFrame(function() {
+        syncFrame = 0;
+        syncTocState();
+      });
+    };
+
+    tocLinks.forEach(function(link) {
+      if (!(link instanceof HTMLAnchorElement))
+        return;
+
+      link.addEventListener("click", function(event) {
+        var slug = link.dataset.slug || "";
+        var entry = headingEntriesBySlug[slug];
+
+        setMobileOpen(false);
+
+        if (!entry)
+          return;
+
+        event.preventDefault();
+        applyTocState(entry);
+        programmaticScrollState = {
+          slug: entry.slug,
+          heading: entry.heading,
+          startedAt: Date.now(),
+        };
+
+        if (window.history && typeof window.history.pushState === "function") {
+          window.history.pushState(null, "", "#" + entry.slug);
+        } else {
+          window.location.hash = entry.slug;
+        }
+
+        entry.heading.scrollIntoView({
+          block: "start",
+          behavior: "smooth",
+        });
+        watchProgrammaticScroll();
+      });
+    });
+
+    syncTocState();
+    window.addEventListener("scroll", requestSync, { passive: true });
+    window.addEventListener("resize", requestSync, { passive: true });
+    window.addEventListener("hashchange", requestSync);
+    window.addEventListener("load", syncTocState);
+    window.addEventListener("examtocdesktopchange", syncTocState);
+  };
+
+  if (document.readyState === "loading")
+    document.addEventListener("DOMContentLoaded", initExamToc, { once: true });
+  else
+    initExamToc();
+</script> <div class="exam-page-main"> <aside class="mb-6 overflow-hidden rounded-[8px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:float-right lg:mb-8 lg:ml-6 lg:w-[22rem]"> <div class="border-b border-slate-200 px-4 py-3 dark:border-slate-800"> <p class="m-0 text-sm font-semibold tracking-wide text-slate-600 dark:text-slate-300">
+试题信息
+</p> </div> <dl class="divide-y divide-slate-200 text-sm dark:divide-slate-800"> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">时间</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> 2025-2026学年第一学期 </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">科目</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> <a href="https://byrdocs.org/?c=test&#38;q=图论及其应用">图论及其应用</a> </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">阶段</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> 期末 </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">类型</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> 研究生 </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">学院</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> 信息与通信工程学院、计算机学院、网络空间安全学院、智能工程与自动化学院、物理科学与技术学院、人工智能学院 </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">来源</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> <a href="https://byrdocs.org/?c=test&#38;q=2da40325a022d1f808eb909a297f0a8d" target="_blank">
+BYR Docs 文件
+</a> </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">答案完成度</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> <span class="font-semibold text-slate-500 dark:text-slate-400">未知</span> </dd> </div> </dl> </aside>  <h2 id="二8分">二（8分）</h2>
+<p>证明：对于 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ν</mi><mo>≥</mo><mn>2</mn></mrow><annotation encoding="application/x-tex">\nu \geq 2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7719em;vertical-align:-0.136em"></span><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">≥</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.6444em"></span><span class="mord">2</span></span></span></span> 的图 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal">G</span></span></span></span> ，若 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ε</mi><mo>≤</mo><mi>ν</mi><mo>−</mo><mn>2</mn></mrow><annotation encoding="application/x-tex">\varepsilon \leq \nu - 2</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7719em;vertical-align:-0.136em"></span><span class="mord mathnormal">ε</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">≤</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.6667em;vertical-align:-0.0833em"></span><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em"></span></span><span class="base"><span class="strut" style="height:0.6444em"></span><span class="mord">2</span></span></span></span> ，则 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal">G</span></span></span></span> 不连通。</p>
+<h2 id="三10分">三（10分）</h2>
+<p>用所附算法求下图中最优生成树（边旁的数字表示权重）。</p>
+<figure class="exam-figure exam-figure-float" data-exam-figure data-exam-figure-alt="题图" data-exam-figure-src="题图3.svg" style="--exam-figure-background: white;"> <button aria-label="预览图片" class="exam-figure-trigger" data-exam-figure-trigger type="button"> <span class="exam-figure-media"> <img alt="题图" class="exam-figure-image" data-exam-figure-image loading="lazy" src="/byrdocs-neowiki/exam/25-26-1-%E5%9B%BE%E8%AE%BA%E5%8F%8A%E5%85%B6%E5%BA%94%E7%94%A8-%E6%9C%9F%E6%9C%AB/题图3.svg"> <span aria-hidden="true" class="exam-figure-missing"> <span class="exam-figure-missing-title">图片暂缺</span> <code class="exam-figure-missing-meta" data-exam-figure-missing-meta>题图3.svg</code> </span> </span> </button> <figcaption class="exam-figure-caption"><p>第三题图</p></figcaption> <dialog aria-label="图片预览" class="exam-figure-dialog" data-exam-figure-dialog> <div class="exam-figure-dialog-panel"> <div class="exam-figure-dialog-media"> <div aria-label="题图" class="exam-figure-dialog-svg-container" data-exam-figure-svg-container data-src="/byrdocs-neowiki/exam/25-26-1-%E5%9B%BE%E8%AE%BA%E5%8F%8A%E5%85%B6%E5%BA%94%E7%94%A8-%E6%9C%9F%E6%9C%AB/题图3.svg" role="img"></div> <div class="exam-figure-dialog-fallback" data-exam-figure-dialog-fallback hidden> <p class="exam-figure-dialog-fallback-title">图片暂缺</p> <code class="exam-figure-dialog-fallback-meta" data-exam-figure-missing-meta>题图3.svg</code> </div> </div> <div class="exam-figure-dialog-caption"><p>第三题图</p></div> </div> </dialog> </figure> <script type="module">const x=document.querySelectorAll(".exam-figure[data-exam-figure]:not([data-exam-figure-ready])");x.forEach(a=>{a.setAttribute("data-exam-figure-ready","true");const d=a.querySelector("[data-exam-figure-trigger]"),n=a.querySelector("[data-exam-figure-dialog]"),c=a.querySelector("[data-exam-figure-image]"),s=a.querySelector("[data-exam-figure-dialog-image]"),l=a.querySelector("[data-exam-figure-dialog-fallback]"),h=a.querySelectorAll("[data-exam-figure-missing-meta]"),t=a.querySelector("[data-exam-figure-svg-container]");if(!(d instanceof HTMLButtonElement)||!(n instanceof HTMLDialogElement))return;const o=()=>{l instanceof HTMLDivElement&&(l.hidden=!1),t instanceof HTMLDivElement&&(t.hidden=!0),s instanceof HTMLImageElement&&(s.hidden=!0)},u=()=>{a.setAttribute("data-state","missing"),d.setAttribute("aria-disabled","true"),d.setAttribute("aria-label",`图片缺失：${a.getAttribute("data-exam-figure-src")??"未知文件"}`),o()},g=()=>{if(!(t instanceof HTMLDivElement))return;const i=t.querySelector("svg");if(i instanceof SVGSVGElement)try{const e=i.getBBox();if(e.width<=0||e.height<=0)return;i.setAttribute("viewBox",`${e.x} ${e.y} ${e.width} ${e.height}`);const m=window.innerWidth*.92,f=window.innerHeight*.88,r=Math.min(m/e.width,f/e.height);t.style.width=`${e.width*r}px`,t.style.height=`${e.height*r}px`}catch{}},v=async()=>{if(!(t instanceof HTMLDivElement))return;if(t.getAttribute("data-ready")==="true"){g();return}const i=t.getAttribute("data-src");if(i)try{const e=await fetch(i);if(!e.ok)return o();const m=await e.text(),r=new DOMParser().parseFromString(m,"image/svg+xml").documentElement;if(!(r instanceof SVGSVGElement))return o();t.hidden=!1,l instanceof HTMLDivElement&&(l.hidden=!0),t.style.width="",t.style.height="",r.classList.add("exam-figure-dialog-svg"),r.removeAttribute("width"),r.removeAttribute("height"),r.setAttribute("preserveAspectRatio","xMidYMid meet"),t.replaceChildren(r),t.setAttribute("data-ready","true"),requestAnimationFrame(()=>requestAnimationFrame(g))}catch{o()}};if(c instanceof HTMLImageElement&&(c.complete&&c.naturalWidth===0?u():c.addEventListener("error",u,{once:!0})),s instanceof HTMLImageElement){const i=()=>o();s.complete&&s.naturalWidth===0?i():s.addEventListener("error",i,{once:!0})}h.forEach(i=>{i.addEventListener("click",e=>e.stopPropagation())}),d.addEventListener("click",()=>{a.getAttribute("data-state")!=="missing"&&(n.open||n.showModal(),v())}),n.addEventListener("click",i=>{i.target===n&&n.close()}),window.addEventListener("resize",()=>{n.open&&g()})});</script>
+<p>附：Prim算法（令 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi></mrow><annotation encoding="application/x-tex">S</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0576em">S</span></span></span></span> 为当前子树的顶点集合，<span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi></mrow><annotation encoding="application/x-tex">E</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0576em">E</span></span></span></span> 为当前子树的边的集合，<span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>w</mi><mo stretchy="false">(</mo><mi>u</mi><mi>v</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">w(uv)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.0269em">w</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0359em">uv</span><span class="mclose">)</span></span></span></span> 为边 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>u</mi><mi>v</mi></mrow><annotation encoding="application/x-tex">uv</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em"></span><span class="mord mathnormal" style="margin-right:0.0359em">uv</span></span></span></span> 的权重，<span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi><mo stretchy="false">(</mo><mi>v</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">d(v)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal">d</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0359em">v</span><span class="mclose">)</span></span></span></span> 为点 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>v</mi></mrow><annotation encoding="application/x-tex">v</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em"></span><span class="mord mathnormal" style="margin-right:0.0359em">v</span></span></span></span> 到 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi></mrow><annotation encoding="application/x-tex">S</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0576em">S</span></span></span></span> 的最小距离。）</p>
+<ol start="0">
+<li><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">k = 0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em"></span><span class="mord mathnormal" style="margin-right:0.0315em">k</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.6444em"></span><span class="mord">0</span></span></span></span> ，任取 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ν</mi><mo>∈</mo><mi>V</mi><mo stretchy="false">(</mo><mi>G</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\nu \in V(G)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5782em;vertical-align:-0.0391em"></span><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.2222em">V</span><span class="mopen">(</span><span class="mord mathnormal">G</span><span class="mclose">)</span></span></span></span> ，令 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>ν</mi><mn>0</mn></msub><mo>=</mo><mi>ν</mi></mrow><annotation encoding="application/x-tex">\nu_{0} = \nu</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em"><span style="top:-2.55em;margin-left:-0.0637em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight">0</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.4306em"></span><span class="mord mathnormal" style="margin-right:0.0637em">ν</span></span></span></span> ， <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mo>=</mo><mo stretchy="false">{</mo><msub><mi>ν</mi><mn>0</mn></msub><mo stretchy="false">}</mo><mo separator="true">,</mo><mi>E</mi><mo>=</mo><mi mathvariant="normal">∅</mi></mrow><annotation encoding="application/x-tex">S = \{\nu_0\}, E = \emptyset</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0576em">S</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mopen">{</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em"><span style="top:-2.55em;margin-left:-0.0637em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span><span class="mclose">}</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em"></span><span class="mord mathnormal" style="margin-right:0.0576em">E</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.8056em;vertical-align:-0.0556em"></span><span class="mord">∅</span></span></span></span> ， <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi><mo stretchy="false">(</mo><msub><mi>ν</mi><mn>0</mn></msub><mo stretchy="false">)</mo><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">d(\nu_0) = 0</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal">d</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em"><span style="top:-2.55em;margin-left:-0.0637em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.6444em"></span><span class="mord">0</span></span></span></span> ， <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi><mo stretchy="false">(</mo><mi>ν</mi><mo stretchy="false">)</mo><mo>=</mo><mi mathvariant="normal">∞</mi><mo stretchy="false">(</mo><mi>ν</mi><mo mathvariant="normal">≠</mo><msub><mi>ν</mi><mn>0</mn></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">d(\nu) = \infty (\nu \neq \nu_0)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal">d</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord">∞</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel"><span class="mrel"><span class="mord vbox"><span class="thinbox"><span class="rlap"><span class="strut" style="height:0.8889em;vertical-align:-0.1944em"></span><span class="inner"><span class="mord"><span class="mrel"></span></span></span><span class="fix"></span></span></span></span></span><span class="mspace nobreak"></span><span class="mrel">=</span></span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em"><span style="top:-2.55em;margin-left:-0.0637em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span></li>
+<li>若 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mo>=</mo><mi>V</mi><mo stretchy="false">(</mo><mi>G</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">S = V(G)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0576em">S</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.2222em">V</span><span class="mopen">(</span><span class="mord mathnormal">G</span><span class="mclose">)</span></span></span></span> ，结束（<span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi></mrow><annotation encoding="application/x-tex">S</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0576em">S</span></span></span></span> 与 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi></mrow><annotation encoding="application/x-tex">E</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0576em">E</span></span></span></span> 分别为最优树的顶点集与边集）；否则，转 2。</li>
+<li>对任意的 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ν</mi><mo>∈</mo><mi>V</mi><mo stretchy="false">(</mo><mi>G</mi><mo stretchy="false">)</mo><mo>∖</mo><mi>S</mi></mrow><annotation encoding="application/x-tex">\nu \in V(G) \setminus S</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5782em;vertical-align:-0.0391em"></span><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.2222em">V</span><span class="mopen">(</span><span class="mord mathnormal">G</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mbin">∖</span><span class="mspace" style="margin-right:0.2222em"></span></span><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0576em">S</span></span></span></span> ，计算 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi><mo stretchy="false">(</mo><mi>ν</mi><mo stretchy="false">)</mo><mo>=</mo><mi>min</mi><mo>⁡</mo><mo stretchy="false">{</mo><mi>w</mi><mo stretchy="false">(</mo><msub><mi>v</mi><mi>k</mi></msub><mi>ν</mi><mo stretchy="false">)</mo><mo separator="true">,</mo><mi>d</mi><mo stretchy="false">(</mo><mi>ν</mi><mo stretchy="false">)</mo><mo stretchy="false">}</mo></mrow><annotation encoding="application/x-tex">d(\nu) = \min \{w(v_k\nu), d(\nu)\}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal">d</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mop">min</span><span class="mopen">{</span><span class="mord mathnormal" style="margin-right:0.0269em">w</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0359em">v</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em">k</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em"></span><span class="mord mathnormal">d</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="mclose">)}</span></span></span></span>；对所有的 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ν</mi><mo>∈</mo><mi>V</mi><mo stretchy="false">(</mo><mi>G</mi><mo stretchy="false">)</mo><mo>∖</mo><mi>S</mi></mrow><annotation encoding="application/x-tex">\nu \in V(G) \setminus S</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5782em;vertical-align:-0.0391em"></span><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.2222em">V</span><span class="mopen">(</span><span class="mord mathnormal">G</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mbin">∖</span><span class="mspace" style="margin-right:0.2222em"></span></span><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0576em">S</span></span></span></span> ，计算 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>min</mi><mo>⁡</mo><mo stretchy="false">{</mo><mi>d</mi><mo stretchy="false">(</mo><mi>ν</mi><mo stretchy="false">)</mo><mo>∣</mo><mi>ν</mi><mo>∈</mo><mi>V</mi><mo stretchy="false">(</mo><mi>G</mi><mo stretchy="false">)</mo><mo>∖</mo><mi>S</mi><mo stretchy="false">}</mo></mrow><annotation encoding="application/x-tex">\min\{d(\nu) \mid \nu \in V(G) \setminus S\}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mop">min</span><span class="mopen">{</span><span class="mord mathnormal">d</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.5782em;vertical-align:-0.0391em"></span><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.2222em">V</span><span class="mopen">(</span><span class="mord mathnormal">G</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mbin">∖</span><span class="mspace" style="margin-right:0.2222em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.0576em">S</span><span class="mclose">}</span></span></span></span> ，令 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>ν</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub></mrow><annotation encoding="application/x-tex">\nu_{k+1}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:-0.0637em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em"><span></span></span></span></span></span></span></span></span></span> 为最小值点，若 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>d</mi><mo stretchy="false">(</mo><msub><mi>ν</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub><mo stretchy="false">)</mo><mo>=</mo><mi mathvariant="normal">∞</mi></mrow><annotation encoding="application/x-tex">d(\nu_{k+1}) = \infty</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal">d</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:-0.0637em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.4306em"></span><span class="mord">∞</span></span></span></span> ，则图 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal">G</span></span></span></span> 不连通，结束（<span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal">G</span></span></span></span> 没有生成树）；否则，选取边 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>ν</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub></mrow><annotation encoding="application/x-tex">\nu_{k+1}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:-0.0637em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em"><span></span></span></span></span></span></span></span></span></span> （其中 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>ν</mi><mo>∈</mo><mi>S</mi></mrow><annotation encoding="application/x-tex">\nu \in S</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5782em;vertical-align:-0.0391em"></span><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0576em">S</span></span></span></span> ， <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>w</mi><mo stretchy="false">(</mo><msub><mi>ν</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub><mo stretchy="false">)</mo><mo>=</mo><mi>d</mi><mo stretchy="false">(</mo><msub><mi>ν</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">w(\nu_{k+1}) = d(\nu_{k+1})</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.0269em">w</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:-0.0637em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal">d</span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:-0.0637em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span>），令 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mo>=</mo><mi>S</mi><mo>∪</mo><mo stretchy="false">{</mo><msub><mi>ν</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub><mo stretchy="false">}</mo></mrow><annotation encoding="application/x-tex">S = S \cup \{\nu_{k+1}\}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0576em">S</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0576em">S</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mbin">∪</span><span class="mspace" style="margin-right:0.2222em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mopen">{</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:-0.0637em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em"><span></span></span></span></span></span></span><span class="mclose">}</span></span></span></span> ， <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi><mo>=</mo><mi>E</mi><mo>∪</mo><mo stretchy="false">{</mo><msub><mi>ν</mi><mrow><mi>k</mi><mo>+</mo><mn>1</mn></mrow></msub><mo stretchy="false">}</mo></mrow><annotation encoding="application/x-tex">E = E \cup \{\nu_{k+1}\}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0576em">E</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0576em">E</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mbin">∪</span><span class="mspace" style="margin-right:0.2222em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mopen">{</span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0637em">ν</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:-0.0637em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0315em">k</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em"><span></span></span></span></span></span></span><span class="mclose">}</span></span></span></span> ，令 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>k</mi><mo>:</mo><mo>=</mo><mi>k</mi><mo>+</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">k := k + 1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em"></span><span class="mord mathnormal" style="margin-right:0.0315em">k</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">:=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.7778em;vertical-align:-0.0833em"></span><span class="mord mathnormal" style="margin-right:0.0315em">k</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em"></span></span><span class="base"><span class="strut" style="height:0.6444em"></span><span class="mord">1</span></span></span></span> ，转 1。</li>
+</ol>
+<h2 id="四12分">四（12分）</h2>
+<p>用所附算法求下面赋权完全偶图 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi><mo>=</mo><mo stretchy="false">(</mo><mi>X</mi><mo separator="true">,</mo><mi>Y</mi><mo separator="true">;</mo><mi>E</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">G = (X,Y;E)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal">G</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0785em">X</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em"></span><span class="mord mathnormal" style="margin-right:0.2222em">Y</span><span class="mpunct">;</span><span class="mspace" style="margin-right:0.1667em"></span><span class="mord mathnormal" style="margin-right:0.0576em">E</span><span class="mclose">)</span></span></span></span> 中的最优匹配（权重最大的完美匹配）。
+<span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>M</mi><mo>=</mo><mo stretchy="false">(</mo><msub><mi>m</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">M = (m_{ij})</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.109em">M</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0572em">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span> ，其中 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>m</mi><mrow><mi>i</mi><mi>j</mi></mrow></msub></mrow><annotation encoding="application/x-tex">m_{ij}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7167em;vertical-align:-0.2861em"></span><span class="mord"><span class="mord mathnormal">m</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0572em">ij</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em"><span></span></span></span></span></span></span></span></span></span> 表示边 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false">(</mo><msub><mi>x</mi><mi>i</mi></msub><mo separator="true">,</mo><msub><mi>y</mi><mi>j</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(x_i, y_j)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em"></span><span class="mopen">(</span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">i</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0359em">y</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3117em"><span style="top:-2.55em;margin-left:-0.0359em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0572em">j</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em"><span></span></span></span></span></span></span><span class="mclose">)</span></span></span></span> 的权重。</p>
+<span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mo fence="true">[</mo><mtable rowspacing="0.16em" columnalign="center center center center center" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>4</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>5</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>8</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>10</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>11</mn></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>7</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>6</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>5</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>7</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>4</mn></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>8</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>5</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>12</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>9</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>6</mn></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>6</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>6</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>13</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>10</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>7</mn></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>4</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>5</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>7</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>9</mn></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mn>8</mn></mstyle></mtd></mtr></mtable><mo fence="true">]</mo></mrow><annotation encoding="application/x-tex">\left[
+\begin{matrix}
+4 &amp; 5 &amp; 8 &amp; 10 &amp; 11 \\
+7 &amp; 6 &amp; 5 &amp; 7 &amp; 4 \\
+8 &amp; 5 &amp; 12 &amp; 9 &amp; 6 \\
+6 &amp; 6 &amp; 13 &amp; 10 &amp; 7 \\
+4 &amp; 5 &amp; 7 &amp; 9 &amp; 8
+\end{matrix}
+\right]</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:6em;vertical-align:-2.75em"></span><span class="minner"><span class="mopen"><span class="delimsizing mult"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:3.25em"><span style="top:-5.25em"><span class="pstrut" style="height:8em"></span><span style="width:0.667em;height:6em"><svg xmlns="http://www.w3.org/2000/svg" width="0.667em" height="6em" viewBox="0 0 667 6000"><path d="M403 1759 V84 H666 V0 H319 V1759 v2400 v1759 h347 v-84
+H403z M403 1759 V0 H319 V1759 v2400 v1759 h84z"></path></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:2.75em"><span></span></span></span></span></span></span><span class="mord"><span class="mtable"><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:3.25em"><span style="top:-5.41em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">4</span></span></span><span style="top:-4.21em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">7</span></span></span><span style="top:-3.01em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">8</span></span></span><span style="top:-1.81em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">6</span></span></span><span style="top:-0.61em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">4</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:2.75em"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em"></span><span class="arraycolsep" style="width:0.5em"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:3.25em"><span style="top:-5.41em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">5</span></span></span><span style="top:-4.21em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">6</span></span></span><span style="top:-3.01em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">5</span></span></span><span style="top:-1.81em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">6</span></span></span><span style="top:-0.61em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">5</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:2.75em"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em"></span><span class="arraycolsep" style="width:0.5em"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:3.25em"><span style="top:-5.41em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">8</span></span></span><span style="top:-4.21em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">5</span></span></span><span style="top:-3.01em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">12</span></span></span><span style="top:-1.81em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">13</span></span></span><span style="top:-0.61em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">7</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:2.75em"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em"></span><span class="arraycolsep" style="width:0.5em"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:3.25em"><span style="top:-5.41em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">10</span></span></span><span style="top:-4.21em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">7</span></span></span><span style="top:-3.01em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">9</span></span></span><span style="top:-1.81em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">10</span></span></span><span style="top:-0.61em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">9</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:2.75em"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em"></span><span class="arraycolsep" style="width:0.5em"></span><span class="col-align-c"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:3.25em"><span style="top:-5.41em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">11</span></span></span><span style="top:-4.21em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">4</span></span></span><span style="top:-3.01em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">6</span></span></span><span style="top:-1.81em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">7</span></span></span><span style="top:-0.61em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord">8</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:2.75em"><span></span></span></span></span></span></span></span><span class="mclose"><span class="delimsizing mult"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:3.25em"><span style="top:-5.25em"><span class="pstrut" style="height:8em"></span><span style="width:0.667em;height:6em"><svg xmlns="http://www.w3.org/2000/svg" width="0.667em" height="6em" viewBox="0 0 667 6000"><path d="M347 1759 V0 H0 V84 H263 V1759 v2400 v1759 H0 v84 H347z
+M347 1759 V0 H263 V1759 v2400 v1759 h84z"></path></svg></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:2.75em"><span></span></span></span></span></span></span></span></span></span></span></span>
+<p>附：对赋权完全偶图 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi><mo>=</mo><mo stretchy="false">(</mo><mi>X</mi><mo separator="true">,</mo><mi>Y</mi><mo separator="true">;</mo><mi>E</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">G = (X,Y;E)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal">G</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0785em">X</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em"></span><span class="mord mathnormal" style="margin-right:0.2222em">Y</span><span class="mpunct">;</span><span class="mspace" style="margin-right:0.1667em"></span><span class="mord mathnormal" style="margin-right:0.0576em">E</span><span class="mclose">)</span></span></span></span> ，以 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal">G</span></span></span></span> 的任意 f.v.l. <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>l</mi></mrow><annotation encoding="application/x-tex">l</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em"></span><span class="mord mathnormal" style="margin-right:0.0197em">l</span></span></span></span> 作为开始。 定 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>G</mi><mi>l</mi></msub></mrow><annotation encoding="application/x-tex">G_{l}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em"></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0197em">l</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span></span></span></span> ，并在 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>G</mi><mi>l</mi></msub></mrow><annotation encoding="application/x-tex">G_{l}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em"></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0197em">l</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span></span></span></span> 上任取一匹配 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>M</mi></mrow><annotation encoding="application/x-tex">M</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.109em">M</span></span></span></span> （可为 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∅</mi></mrow><annotation encoding="application/x-tex">\varnothing</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6633em;vertical-align:-0.0817em"></span><span class="mord amsrm">∅</span></span></span></span>）作为开始的匹配。</p>
+<p>（1）若 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>M</mi></mrow><annotation encoding="application/x-tex">M</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.109em">M</span></span></span></span> 饱和 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>X</mi></mrow><annotation encoding="application/x-tex">X</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0785em">X</span></span></span></span> 的每个顶点，则 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>M</mi></mrow><annotation encoding="application/x-tex">M</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.109em">M</span></span></span></span> 为最优匹配，停止；否则，任取一 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>M</mi></mrow><annotation encoding="application/x-tex">M</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.109em">M</span></span></span></span>-不饱和顶点 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>u</mi></mrow><annotation encoding="application/x-tex">u</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.4306em"></span><span class="mord mathnormal">u</span></span></span></span> ，令 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mo>=</mo><mo stretchy="false">{</mo><mi>u</mi><mo stretchy="false">}</mo></mrow><annotation encoding="application/x-tex">S = \{u\}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0576em">S</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mopen">{</span><span class="mord mathnormal">u</span><span class="mclose">}</span></span></span></span> ， <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>T</mi><mo>=</mo><mi mathvariant="normal">∅</mi></mrow><annotation encoding="application/x-tex">T = \varnothing</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.1389em">T</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.6633em;vertical-align:-0.0817em"></span><span class="mord amsrm">∅</span></span></span></span>。</p>
+<p>（2）若 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>N</mi><msub><mi>G</mi><mi>l</mi></msub></msub><mo stretchy="false">(</mo><mi>S</mi><mo stretchy="false">)</mo><mo>⊃</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">N_{G_l}(S) \supset T</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0059em;vertical-align:-0.2559em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.109em">N</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em"><span style="top:-2.55em;margin-left:-0.109em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em"><span style="top:-2.3488em;margin-left:0em;margin-right:0.0714em"><span class="pstrut" style="height:2.5em"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0197em">l</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1512em"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2559em"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0576em">S</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">⊃</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.1389em">T</span></span></span></span> ，转到（3）；否则， <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>N</mi><msub><mi>G</mi><mi>l</mi></msub></msub><mo stretchy="false">(</mo><mi>S</mi><mo stretchy="false">)</mo><mo>=</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">N_{G_l}(S) = T</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.0059em;vertical-align:-0.2559em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.109em">N</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em"><span style="top:-2.55em;margin-left:-0.109em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em"><span style="top:-2.3488em;margin-left:0em;margin-right:0.0714em"><span class="pstrut" style="height:2.5em"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0197em">l</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1512em"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2559em"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0576em">S</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.1389em">T</span></span></span></span>。计算 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>α</mi><mi>l</mi></msub><mo>=</mo><msub><mrow><mi>min</mi><mo>⁡</mo></mrow><mrow><mi>x</mi><mo>∈</mo><mi>S</mi><mo separator="true">,</mo><mi>y</mi><mo>∈</mo><mi>T</mi></mrow></msub><mo stretchy="false">{</mo><mi>l</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>+</mo><mi>l</mi><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo><mo>−</mo><mi>w</mi><mo stretchy="false">(</mo><mi>x</mi><mi>y</mi><mo stretchy="false">)</mo><mo stretchy="false">}</mo></mrow><annotation encoding="application/x-tex">\alpha_l = \min_{x \in S, y \in T} \{l(x) + l(y) - w(xy)\}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0037em">α</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:-0.0037em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0197em">l</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em"></span><span class="mop"><span class="mop">min</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em"><span style="top:-2.55em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">x</span><span class="mrel mtight">∈</span><span class="mord mathnormal mtight" style="margin-right:0.0576em">S</span><span class="mpunct mtight">,</span><span class="mord mathnormal mtight" style="margin-right:0.0359em">y</span><span class="mrel mtight">∈</span><span class="mord mathnormal mtight" style="margin-right:0.1389em">T</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em"><span></span></span></span></span></span></span><span class="mopen">{</span><span class="mord mathnormal" style="margin-right:0.0197em">l</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.0197em">l</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0359em">y</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.0269em">w</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mord mathnormal" style="margin-right:0.0359em">y</span><span class="mclose">)}</span></span></span></span> 及 f.v.l. <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mover accent="true"><mi>l</mi><mo stretchy="true">~</mo></mover><mo>:</mo><mover accent="true"><mi>l</mi><mo stretchy="true">~</mo></mover><mo stretchy="false">(</mo><mi>v</mi><mo stretchy="false">)</mo><mo>=</mo><mrow><mo fence="true">{</mo><mtable rowspacing="0.36em" columnalign="left left" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>l</mi><mo stretchy="false">(</mo><mi>v</mi><mo stretchy="false">)</mo><mo>−</mo><msub><mi>α</mi><mi>l</mi></msub><mo separator="true">,</mo></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>v</mi><mo>∈</mo><mi>S</mi></mrow></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>l</mi><mo stretchy="false">(</mo><mi>v</mi><mo stretchy="false">)</mo><mo>+</mo><msub><mi>α</mi><mi>l</mi></msub><mo separator="true">,</mo></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>v</mi><mo>∈</mo><mi>T</mi></mrow></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>l</mi><mo stretchy="false">(</mo><mi>v</mi><mo stretchy="false">)</mo><mo separator="true">,</mo></mrow></mstyle></mtd><mtd><mstyle scriptlevel="0" displaystyle="false"><mtext>其它</mtext></mstyle></mtd></mtr></mtable></mrow></mrow><annotation encoding="application/x-tex">\widetilde{l}: \widetilde{l}(v) = \begin{cases}
+l(v) - \alpha_l, &amp; v \in S \\
+l(v) + \alpha_l, &amp; v \in T \\
+l(v), &amp; \text{其它}
+\end{cases}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9544em"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9544em"><span style="top:-3em"><span class="pstrut" style="height:3em"></span><span class="mord mathnormal" style="margin-right:0.0197em">l</span></span><span class="svg-align" style="width:calc(100% - 0.1667em);margin-left:0.1667em;top:-3.6944em"><span class="pstrut" style="height:3em"></span><span style="height:0.26em"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.26em" viewBox="0 0 600 260" preserveAspectRatio="none"><path d="M200 55.538c-77 0-168 73.953-177 73.953-3 0-7
+-2.175-9-5.437L2 97c-1-2-2-4-2-6 0-4 2-7 5-9l20-12C116 12 171 0 207 0c86 0
+ 114 68 191 68 78 0 168-68 177-68 4 0 7 2 9 5l12 19c1 2.175 2 4.35 2 6.525 0
+ 4.35-2 7.613-5 9.788l-19 13.05c-92 63.077-116.937 75.308-183 76.128
+-68.267.847-113-73.952-191-73.952z"></path></svg></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">:</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1.2044em;vertical-align:-0.25em"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9544em"><span style="top:-3em"><span class="pstrut" style="height:3em"></span><span class="mord mathnormal" style="margin-right:0.0197em">l</span></span><span class="svg-align" style="width:calc(100% - 0.1667em);margin-left:0.1667em;top:-3.6944em"><span class="pstrut" style="height:3em"></span><span style="height:0.26em"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.26em" viewBox="0 0 600 260" preserveAspectRatio="none"><path d="M200 55.538c-77 0-168 73.953-177 73.953-3 0-7
+-2.175-9-5.437L2 97c-1-2-2-4-2-6 0-4 2-7 5-9l20-12C116 12 171 0 207 0c86 0
+ 114 68 191 68 78 0 168-68 177-68 4 0 7 2 9 5l12 19c1 2.175 2 4.35 2 6.525 0
+ 4.35-2 7.613-5 9.788l-19 13.05c-92 63.077-116.937 75.308-183 76.128
+-68.267.847-113-73.952-191-73.952z"></path></svg></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0359em">v</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:4.32em;vertical-align:-1.91em"></span><span class="minner"><span class="mopen"><span class="delimsizing mult"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:2.35em"><span style="top:-2.2em"><span class="pstrut" style="height:3.15em"></span><span class="delimsizinginner delim-size4"><span>⎩</span></span></span><span style="top:-2.192em"><span class="pstrut" style="height:3.15em"></span><span style="height:0.316em;width:0.8889em"><svg xmlns="http://www.w3.org/2000/svg" width="0.8889em" height="0.316em" style="width:0.8889em" viewBox="0 0 888.89 316" preserveAspectRatio="xMinYMin"><path d="M384 0 H504 V316 H384z M384 0 H504 V316 H384z"></path></svg></span></span><span style="top:-3.15em"><span class="pstrut" style="height:3.15em"></span><span class="delimsizinginner delim-size4"><span>⎨</span></span></span><span style="top:-4.292em"><span class="pstrut" style="height:3.15em"></span><span style="height:0.316em;width:0.8889em"><svg xmlns="http://www.w3.org/2000/svg" width="0.8889em" height="0.316em" style="width:0.8889em" viewBox="0 0 888.89 316" preserveAspectRatio="xMinYMin"><path d="M384 0 H504 V316 H384z M384 0 H504 V316 H384z"></path></svg></span></span><span style="top:-4.6em"><span class="pstrut" style="height:3.15em"></span><span class="delimsizinginner delim-size4"><span>⎧</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.85em"><span></span></span></span></span></span></span><span class="mord"><span class="mtable"><span class="col-align-l"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:2.41em"><span style="top:-4.41em"><span class="pstrut" style="height:3.008em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0197em">l</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0359em">v</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0037em">α</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:-0.0037em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0197em">l</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span><span class="mpunct">,</span></span></span><span style="top:-2.97em"><span class="pstrut" style="height:3.008em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0197em">l</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0359em">v</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0037em">α</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:-0.0037em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0197em">l</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span><span class="mpunct">,</span></span></span><span style="top:-1.53em"><span class="pstrut" style="height:3.008em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0197em">l</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0359em">v</span><span class="mclose">)</span><span class="mpunct">,</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.91em"><span></span></span></span></span></span><span class="arraycolsep" style="width:1em"></span><span class="col-align-l"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:2.41em"><span style="top:-4.41em"><span class="pstrut" style="height:3.008em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0359em">v</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mord mathnormal" style="margin-right:0.0576em">S</span></span></span><span style="top:-2.97em"><span class="pstrut" style="height:3.008em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0359em">v</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mord mathnormal" style="margin-right:0.1389em">T</span></span></span><span style="top:-1.53em"><span class="pstrut" style="height:3.008em"></span><span class="mord"><span class="mord text"><span class="mord cjk_fallback">其它</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:1.91em"><span></span></span></span></span></span></span></span><span class="mclose nulldelimiter"></span></span></span></span></span>，令 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>l</mi><mo>=</mo><mover accent="true"><mi>l</mi><mo stretchy="true">~</mo></mover></mrow><annotation encoding="application/x-tex">l = \widetilde{l}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em"></span><span class="mord mathnormal" style="margin-right:0.0197em">l</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.9544em"></span><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9544em"><span style="top:-3em"><span class="pstrut" style="height:3em"></span><span class="mord mathnormal" style="margin-right:0.0197em">l</span></span><span class="svg-align" style="width:calc(100% - 0.1667em);margin-left:0.1667em;top:-3.6944em"><span class="pstrut" style="height:3em"></span><span style="height:0.26em"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.26em" viewBox="0 0 600 260" preserveAspectRatio="none"><path d="M200 55.538c-77 0-168 73.953-177 73.953-3 0-7
+-2.175-9-5.437L2 97c-1-2-2-4-2-6 0-4 2-7 5-9l20-12C116 12 171 0 207 0c86 0
+ 114 68 191 68 78 0 168-68 177-68 4 0 7 2 9 5l12 19c1 2.175 2 4.35 2 6.525 0
+ 4.35-2 7.613-5 9.788l-19 13.05c-92 63.077-116.937 75.308-183 76.128
+-68.267.847-113-73.952-191-73.952z"></path></svg></span></span></span></span></span></span></span></span></span> ， <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>G</mi><mi>l</mi></msub><mo>=</mo><msub><mi>G</mi><mover accent="true"><mi>l</mi><mo stretchy="true">~</mo></mover></msub></mrow><annotation encoding="application/x-tex">G_l = G_{\widetilde{l}}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em"></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0197em">l</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1.0066em;vertical-align:-0.3233em"></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em"><span style="top:-2.3767em;margin-left:0em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord accent mtight"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.9544em"><span style="top:-2.7em"><span class="pstrut" style="height:2.7em"></span><span class="mord mathnormal mtight" style="margin-right:0.0197em">l</span></span><span class="svg-align" style="width:calc(100% - 0.1667em);margin-left:0.1667em;top:-3.3944em"><span class="pstrut" style="height:2.7em"></span><span class="mtight" style="height:0.26em"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.26em" viewBox="0 0 600 260" preserveAspectRatio="none"><path d="M200 55.538c-77 0-168 73.953-177 73.953-3 0-7
+-2.175-9-5.437L2 97c-1-2-2-4-2-6 0-4 2-7 5-9l20-12C116 12 171 0 207 0c86 0
+ 114 68 191 68 78 0 168-68 177-68 4 0 7 2 9 5l12 19c1 2.175 2 4.35 2 6.525 0
+ 4.35-2 7.613-5 9.788l-19 13.05c-92 63.077-116.937 75.308-183 76.128
+-68.267.847-113-73.952-191-73.952z"></path></svg></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.3233em"><span></span></span></span></span></span></span></span></span></span>。</p>
+<p>（3）选取 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi><mo>∈</mo><msub><mi>N</mi><msub><mi>G</mi><mi>l</mi></msub></msub><mo stretchy="false">(</mo><mi>S</mi><mo stretchy="false">)</mo><mo>∖</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">y \in N_{G_l}(S) \setminus T</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7335em;vertical-align:-0.1944em"></span><span class="mord mathnormal" style="margin-right:0.0359em">y</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1.0059em;vertical-align:-0.2559em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.109em">N</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em"><span style="top:-2.55em;margin-left:-0.109em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3448em"><span style="top:-2.3488em;margin-left:0em;margin-right:0.0714em"><span class="pstrut" style="height:2.5em"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mathnormal mtight" style="margin-right:0.0197em">l</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.1512em"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2559em"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0576em">S</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mbin">∖</span><span class="mspace" style="margin-right:0.2222em"></span></span><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.1389em">T</span></span></span></span> ，若 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi></mrow><annotation encoding="application/x-tex">y</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em"></span><span class="mord mathnormal" style="margin-right:0.0359em">y</span></span></span></span> 为 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>M</mi></mrow><annotation encoding="application/x-tex">M</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.109em">M</span></span></span></span>-饱和的，设 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi><mi>z</mi><mo>∈</mo><mi>M</mi></mrow><annotation encoding="application/x-tex">yz \in M</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7335em;vertical-align:-0.1944em"></span><span class="mord mathnormal" style="margin-right:0.0359em">y</span><span class="mord mathnormal" style="margin-right:0.044em">z</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.109em">M</span></span></span></span> ，则令： <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mo>=</mo><mi>S</mi><mo>∪</mo><mo stretchy="false">{</mo><mi>z</mi><mo stretchy="false">}</mo></mrow><annotation encoding="application/x-tex">S = S \cup \{z\}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0576em">S</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.0576em">S</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mbin">∪</span><span class="mspace" style="margin-right:0.2222em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mopen">{</span><span class="mord mathnormal" style="margin-right:0.044em">z</span><span class="mclose">}</span></span></span></span> ， <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>T</mi><mo>=</mo><mi>T</mi><mo>∪</mo><mo stretchy="false">{</mo><mi>y</mi><mo stretchy="false">}</mo></mrow><annotation encoding="application/x-tex">T = T \cup \{y\}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.1389em">T</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.1389em">T</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mbin">∪</span><span class="mspace" style="margin-right:0.2222em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mopen">{</span><span class="mord mathnormal" style="margin-right:0.0359em">y</span><span class="mclose">}</span></span></span></span> ，转（2）；否则， <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>y</mi></mrow><annotation encoding="application/x-tex">y</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em"></span><span class="mord mathnormal" style="margin-right:0.0359em">y</span></span></span></span> 为 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>M</mi></mrow><annotation encoding="application/x-tex">M</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.109em">M</span></span></span></span>-不饱和的，存在 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>M</mi></mrow><annotation encoding="application/x-tex">M</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.109em">M</span></span></span></span>-可扩路 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>P</mi></mrow><annotation encoding="application/x-tex">P</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.1389em">P</span></span></span></span> ，令 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>M</mi><mo>=</mo><mi>M</mi><mi mathvariant="normal">Δ</mi><mi>E</mi><mo stretchy="false">(</mo><mi>P</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">M = M \Delta E(P)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.109em">M</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.109em">M</span><span class="mord">Δ</span><span class="mord mathnormal" style="margin-right:0.0576em">E</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.1389em">P</span><span class="mclose">)</span></span></span></span> ，转到（1）。</p>
+<p>附：对赋权完全偶图 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi><mo>=</mo><mo stretchy="false">(</mo><mi>X</mi><mo separator="true">,</mo><mi>Y</mi><mo separator="true">;</mo><mi>E</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">G = (X,Y;E)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal">G</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0785em">X</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em"></span><span class="mord mathnormal" style="margin-right:0.2222em">Y</span><span class="mpunct">;</span><span class="mspace" style="margin-right:0.1667em"></span><span class="mord mathnormal" style="margin-right:0.0576em">E</span><span class="mclose">)</span></span></span></span> ，如果 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal">G</span></span></span></span> 的顶点标号 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>l</mi><mo stretchy="false">(</mo><mi>v</mi><mo stretchy="false">)</mo><mo separator="true">,</mo><mi>v</mi><mo>∈</mo><mi>V</mi><mo stretchy="false">(</mo><mi>G</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">l(v), v \in V(G)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.0197em">l</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0359em">v</span><span class="mclose">)</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em"></span><span class="mord mathnormal" style="margin-right:0.0359em">v</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.2222em">V</span><span class="mopen">(</span><span class="mord mathnormal">G</span><span class="mclose">)</span></span></span></span> 满足：对 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi mathvariant="normal">∀</mi><mi>x</mi><mo>∈</mo><mi>X</mi><mo separator="true">,</mo><mi>y</mi><mo>∈</mo><mi>Y</mi></mrow><annotation encoding="application/x-tex">\forall x\in X, y\in Y</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7335em;vertical-align:-0.0391em"></span><span class="mord">∀</span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.8778em;vertical-align:-0.1944em"></span><span class="mord mathnormal" style="margin-right:0.0785em">X</span><span class="mpunct">,</span><span class="mspace" style="margin-right:0.1667em"></span><span class="mord mathnormal" style="margin-right:0.0359em">y</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal" style="margin-right:0.2222em">Y</span></span></span></span> 都有 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>l</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>+</mo><mi>l</mi><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo><mo>≥</mo><mi>w</mi><mo stretchy="false">(</mo><mi>x</mi><mi>y</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">l(x) + l(y)\geq w(xy)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.0197em">l</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.0197em">l</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0359em">y</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">≥</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.0269em">w</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mord mathnormal" style="margin-right:0.0359em">y</span><span class="mclose">)</span></span></span></span> ，其中 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>w</mi><mo stretchy="false">(</mo><mi>x</mi><mi>y</mi><mo stretchy="false">)</mo><mo stretchy="false">(</mo><mo>≥</mo><mn>0</mn><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">w(xy) (\geq 0)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.0269em">w</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mord mathnormal" style="margin-right:0.0359em">y</span><span class="mclose">)</span><span class="mopen">(</span><span class="mrel">≥</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord">0</span><span class="mclose">)</span></span></span></span> 为边 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>x</mi><mi>y</mi></mrow><annotation encoding="application/x-tex">xy</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.625em;vertical-align:-0.1944em"></span><span class="mord mathnormal">x</span><span class="mord mathnormal" style="margin-right:0.0359em">y</span></span></span></span> 的权重，则称 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>l</mi></mrow><annotation encoding="application/x-tex">l</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6944em"></span><span class="mord mathnormal" style="margin-right:0.0197em">l</span></span></span></span> 为 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal">G</span></span></span></span> 的可行顶点标号，简记为 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal">G</span></span></span></span> 的 f.v.l.。</p>
+<p>对任意赋权完全偶图，可行顶点标号总是存在的，例如：</p>
+<span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mo fence="true">{</mo><mtable rowspacing="0.16em" columnalign="left" columnspacing="1em"><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>l</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>=</mo><msub><mrow><mi>max</mi><mo>⁡</mo></mrow><mrow><mi>y</mi><mo>∈</mo><mi>Y</mi></mrow></msub><mo stretchy="false">{</mo><mi>w</mi><mo stretchy="false">(</mo><mi>x</mi><mi>y</mi><mo stretchy="false">)</mo><mo stretchy="false">}</mo><mi mathvariant="normal">∀</mi><mi>x</mi><mo>∈</mo><mi>X</mi></mrow></mstyle></mtd></mtr><mtr><mtd><mstyle scriptlevel="0" displaystyle="false"><mrow><mi>l</mi><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo><mo>=</mo><mn>0</mn></mrow></mstyle></mtd></mtr></mtable></mrow><annotation encoding="application/x-tex">\left\{
+\begin{array}{l}
+l(x) = \max_{y \in Y} \{w(xy)\} \forall x \in X\\
+l(y) = 0
+\end{array}
+\right.</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:2.4em;vertical-align:-0.95em"></span><span class="minner"><span class="mopen delimcenter" style="top:0em"><span class="delimsizing size3">{</span></span><span class="mord"><span class="mtable"><span class="arraycolsep" style="width:0.5em"></span><span class="col-align-l"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:1.45em"><span style="top:-3.61em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0197em">l</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mop"><span class="mop">max</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em"><span style="top:-2.55em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0359em">y</span><span class="mrel mtight">∈</span><span class="mord mathnormal mtight" style="margin-right:0.2222em">Y</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em"><span></span></span></span></span></span></span><span class="mopen">{</span><span class="mord mathnormal" style="margin-right:0.0269em">w</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mord mathnormal" style="margin-right:0.0359em">y</span><span class="mclose">)}</span><span class="mord">∀</span><span class="mord mathnormal">x</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mord mathnormal" style="margin-right:0.0785em">X</span></span></span><span style="top:-2.41em"><span class="pstrut" style="height:3em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0197em">l</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0359em">y</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mord">0</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.95em"><span></span></span></span></span></span><span class="arraycolsep" style="width:0.5em"></span></span></span><span class="mclose nulldelimiter"></span></span></span></span></span></span>
+<p>记： <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>E</mi><mi>l</mi></msub><mo>=</mo><mo stretchy="false">{</mo><mi>x</mi><mi>y</mi><mo>∈</mo><mi>E</mi><mo>∣</mo><mi>l</mi><mo stretchy="false">(</mo><mi>x</mi><mo stretchy="false">)</mo><mo>+</mo><mi>l</mi><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo><mo>=</mo><mi>w</mi><mo stretchy="false">(</mo><mi>x</mi><mi>y</mi><mo stretchy="false">)</mo><mo stretchy="false">}</mo></mrow><annotation encoding="application/x-tex">E_{l} = \{xy \in E \mid l(x) + l(y) = w(xy)\}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0576em">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0197em">l</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mopen">{</span><span class="mord mathnormal">x</span><span class="mord mathnormal" style="margin-right:0.0359em">y</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">∈</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.0576em">E</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">∣</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.0197em">l</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2222em"></span><span class="mbin">+</span><span class="mspace" style="margin-right:0.2222em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.0197em">l</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.0359em">y</span><span class="mclose">)</span><span class="mspace" style="margin-right:0.2778em"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em"></span><span class="mord mathnormal" style="margin-right:0.0269em">w</span><span class="mopen">(</span><span class="mord mathnormal">x</span><span class="mord mathnormal" style="margin-right:0.0359em">y</span><span class="mclose">)}</span></span></span></span> ，并称以 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>E</mi><mi>l</mi></msub></mrow><annotation encoding="application/x-tex">E_{l}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.0576em">E</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:-0.0576em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0197em">l</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span></span></span></span> 为边集的 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi></mrow><annotation encoding="application/x-tex">G</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em"></span><span class="mord mathnormal">G</span></span></span></span> 的生成子图为相等子图（equality subgraph），记为 <span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>G</mi><mi>l</mi></msub></mrow><annotation encoding="application/x-tex">G_{l}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em"></span><span class="mord"><span class="mord mathnormal">G</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em"><span class="pstrut" style="height:2.7em"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.0197em">l</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em"><span></span></span></span></span></span></span></span></span></span>。</p>  <details id="related-exams" class="related-exams mt-8 overflow-hidden rounded-[8px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900" open data-astro-cid-a6434jl4> <summary class="flex cursor-pointer list-none items-center justify-between px-4 py-3 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50" data-astro-cid-a6434jl4> <p class="m-0 text-sm font-semibold tracking-wide text-slate-600 dark:text-slate-300" data-astro-cid-a6434jl4>
+《图论及其应用》的期末试卷
+</p> <svg class="related-exams-chevron h-4 w-4 flex-none text-slate-400 transition-transform duration-200 dark:text-slate-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-astro-cid-a6434jl4> <polyline points="6 9 12 15 18 9" data-astro-cid-a6434jl4></polyline> </svg> </summary> <ul class="divide-y divide-slate-200 text-sm dark:divide-slate-800" data-astro-cid-a6434jl4> <li class="flex min-h-14 items-center justify-between gap-3 px-4 py-2" data-astro-cid-a6434jl4> <div class="min-w-0" data-astro-cid-a6434jl4> <span class="block truncate leading-6 text-slate-700 dark:text-slate-300" aria-current="page" data-astro-cid-a6434jl4> 25-26-1-图论及其应用-期末 </span> </div> <div class="flex flex-none items-center gap-2" data-astro-cid-a6434jl4> <span class="inline-flex h-5 items-center rounded-md bg-sky-100 px-2 text-xs font-semibold leading-none text-sky-800 dark:bg-sky-900/60 dark:text-sky-200" data-astro-cid-a6434jl4>
+当前
+</span>  </div> </li><li class="flex min-h-14 items-center justify-between gap-3 px-4 py-2" data-astro-cid-a6434jl4> <div class="min-w-0" data-astro-cid-a6434jl4> <a href="/exam/24-25-1-图论及其应用-期末" class="block truncate leading-6 no-underline" data-astro-cid-a6434jl4> 24-25-1-图论及其应用-期末 </a> </div> <div class="flex flex-none items-center gap-2" data-astro-cid-a6434jl4>   </div> </li> </ul> </details> <script type="module">(function(){var t="relatedExamsExpanded",e=document.getElementById("related-exams");if(e)try{var a=localStorage.getItem(t);a!==null&&(e.open=a==="true"),e.addEventListener("toggle",function(){localStorage.setItem(t,String(e.open))})}catch{}})();</script> </div> </div> <div class="floating-toolbar" id="examToolbar" data-expanded="false"> <div class="floating-toolbar-actions" id="examToolbarActions"> <button class="floating-toolbar-control cursor-pointer transition-opacity active:scale-95" id="backToTop" type="button" aria-label="回到顶部" data-tooltip="回到顶部" data-toolbar-action> <svg aria-hidden="true" class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"> <path d="M18 15l-6-6-6 6"></path> </svg> </button> <button class="floating-toolbar-control exam-toolbar-toc-toggle cursor-pointer active:scale-95" id="examTocMobileToggle" type="button" aria-label="显示目录" aria-expanded="false" data-tooltip="目录" data-toolbar-action> <svg aria-hidden="true" class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"> <path d="M9 6h10"></path> <path d="M9 12h10"></path> <path d="M9 18h10"></path> <circle cx="5" cy="6" r="1" fill="currentColor" stroke="none"></circle> <circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"></circle> <circle cx="5" cy="18" r="1" fill="currentColor" stroke="none"></circle> </svg> </button> <a class="no-underline floating-toolbar-control active:scale-95" href="https://github.com/byrdocs/byrdocs-neowiki/edit/master/exams/25-26-1-%E5%9B%BE%E8%AE%BA%E5%8F%8A%E5%85%B6%E5%BA%94%E7%94%A8-%E6%9C%9F%E6%9C%AB/index.mdx" aria-label="在 GitHub 上编辑" data-tooltip="在 GitHub 上编辑" data-toolbar-action> <svg aria-hidden="true" class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"> <path d="M12 20h9"></path> <path d="m16.5 3.5 4 4L8 20l-5 1 1-5 12.5-12.5Z"></path> </svg> </a> <button class="floating-toolbar-control cursor-pointer active:scale-95" id="examPrint" type="button" aria-label="打印试卷" data-tooltip="打印试卷" data-toolbar-action> <svg aria-hidden="true" class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"> <polyline points="6 9 6 2 18 2 18 9"></polyline> <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path> <rect x="6" y="14" width="12" height="8"></rect> </svg> </button> <button class="floating-toolbar-control cursor-pointer active:scale-95 disabled:cursor-default disabled:opacity-50" id="examAnswersToggle" type="button" aria-label="显示全部答案" aria-pressed="false" data-tooltip="显示全部答案" data-toolbar-action> <svg aria-hidden="true" class="h-5 w-5" data-exam-toggle-icon="show" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"> <path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6Z"></path> <circle cx="12" cy="12" r="3"></circle> </svg> <svg aria-hidden="true" class="h-5 w-5" data-exam-toggle-icon="hide" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"> <path d="M3 3l18 18"></path> <path d="M10.6 10.7a2 2 0 0 0 2.7 2.7"></path> <path d="M9.4 5.6A10.7 10.7 0 0 1 12 5.2c6.4 0 10 6 10 6a17.7 17.7 0 0 1-4.1 4.6"></path> <path d="M6.2 6.3C3.7 8 2 10.8 2 10.8s3.6 6 10 6c1.2 0 2.4-.2 3.4-.6"></path> </svg> </button> </div> <button class="floating-toolbar-control floating-toolbar-toggle cursor-pointer active:scale-95" id="examToolbarToggle" type="button" aria-label="展开工具栏" aria-expanded="false" aria-controls="examToolbarActions" data-tooltip="展开工具栏"> <svg aria-hidden="true" class="h-5 w-5" data-toolbar-toggle-icon="open" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"> <path d="M12 5v14"></path> <path d="M5 12h14"></path> </svg> <svg aria-hidden="true" class="h-5 w-5" data-toolbar-toggle-icon="close" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"> <path d="m18 6-12 12"></path> <path d="M6 6l12 12"></path> </svg> </button> </div>  <script>
+  var examToolbar = document.getElementById("examToolbar");
+  var examToolbarToggle = document.getElementById("examToolbarToggle");
+  var examAnswersToggle = document.getElementById("examAnswersToggle");
+  var backToTop = document.getElementById("backToTop");
+  var examPrint = document.getElementById("examPrint");
+  var setExamToolbarExpanded = function(expanded) {
+    if (!(examToolbar instanceof HTMLElement)) return;
+    examToolbar.dataset.expanded = expanded ? "true" : "false";
+    if (examToolbarToggle instanceof HTMLButtonElement) {
+      examToolbarToggle.setAttribute("aria-expanded", String(expanded));
+      examToolbarToggle.setAttribute(
+        "aria-label",
+        expanded ? "收起工具栏" : "展开工具栏",
+      );
+      examToolbarToggle.dataset.tooltip = expanded ? "收起工具栏" : "展开工具栏";
+    }
+  };
+  var toggleExamToolbarExpanded = function() {
+    setExamToolbarExpanded(examToolbar?.dataset.expanded !== "true");
+  };
+
+  setExamToolbarExpanded(false);
+  examToolbarToggle?.addEventListener("click", function(event) {
+    event.stopPropagation();
+    toggleExamToolbarExpanded();
+  });
+  examToolbar?.querySelectorAll("[data-toolbar-action]").forEach(function(control) {
+    control.addEventListener("click", function() {
+      setExamToolbarExpanded(false);
+    });
+  });
+  document.addEventListener("click", function(event) {
+    if (!(examToolbar instanceof HTMLElement) || examToolbar.dataset.expanded !== "true")
+      return;
+    if (examToolbar.contains(event.target))
+      return;
+    setExamToolbarExpanded(false);
+  });
+  document.addEventListener("keydown", function(event) {
+    if (event.key === "Escape")
+      setExamToolbarExpanded(false);
+  });
+
+  // Back to top
+  var updateBackToTopVisibility = function() {
+    if (!backToTop) return;
+    backToTop.classList.toggle("is-visible", window.scrollY > 200);
+  };
+  updateBackToTopVisibility();
+  window.addEventListener("scroll", updateBackToTopVisibility, { passive: true });
+  backToTop?.addEventListener("click", function() {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+
+  // Print preparation (works for both Ctrl+P and print button)
+  var printUrlFooter = null;
+  var prePrintState = null;
+  window.addEventListener("beforeprint", function() {
+    // Save current state to restore after print
+    prePrintState = {
+      blanks: [],
+      solutions: [],
+      choices: []
+    };
+    // Reveal all answers
+    if (!window.__examState?.getAllShown?.()) {
+      window.__examState?.toggleAll?.();
+      prePrintState.wasHidden = true;
+    }
+    // Open all <details> solutions
+    document.querySelectorAll(".exam-solution:not([open])").forEach(function(el) {
+      el.setAttribute("open", "");
+      prePrintState.solutions.push(el);
+    });
+    // Show all blanks
+    document.querySelectorAll(".exam-blank[aria-pressed='false']").forEach(function(el) {
+      el.setAttribute("aria-pressed", "true");
+      prePrintState.blanks.push(el);
+    });
+    // Reveal all choice answers
+    document.querySelectorAll(".exam-choices[data-has-answer='true'][data-revealed='false']").forEach(function(group) {
+      group.querySelectorAll(".exam-choice-option").forEach(function(opt) {
+        if (opt.getAttribute("data-answer") === "true") {
+          opt.classList.add("is-correct");
+          var input = opt.querySelector(".exam-choice-input");
+          if (input) input.checked = true;
+        }
+      });
+      group.setAttribute("data-revealed", "true");
+      prePrintState.choices.push(group);
+    });
+    // Add print footer
+    printUrlFooter = document.createElement("div");
+    printUrlFooter.className = "print-footer";
+    printUrlFooter.style.display = "none";
+    printUrlFooter.innerHTML =
+      '本页面打印自 <a href="' + window.location.href + '">' + window.location.href + '</a><br>' +
+      '来源：<a href="https://wiki.byrdocs.org">BYR Docs 维基真题</a><br>' +
+      '除非另有声明，本文件内容采用 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> 授权。';
+    document.querySelector(".wiki-content")?.appendChild(printUrlFooter);
+  });
+  window.addEventListener("afterprint", function() {
+    // Remove URL footer
+    if (printUrlFooter) { printUrlFooter.remove(); printUrlFooter = null; }
+    // Restore previous state
+    if (!prePrintState) return;
+    if (prePrintState.wasHidden) {
+      window.__examState?.toggleAll?.();
+    }
+    prePrintState.solutions.forEach(function(el) { el.removeAttribute("open"); });
+    prePrintState.blanks.forEach(function(el) { el.setAttribute("aria-pressed", "false"); });
+    prePrintState.choices.forEach(function(group) {
+      group.querySelectorAll(".exam-choice-option").forEach(function(opt) {
+        opt.classList.remove("is-correct");
+        var input = opt.querySelector(".exam-choice-input");
+        if (input) input.checked = false;
+      });
+      group.setAttribute("data-revealed", "false");
+    });
+    prePrintState = null;
+  });
+
+  // Print button just triggers window.print()
+  examPrint?.addEventListener("click", function() { window.print(); });
+
+  // Answers toggle
+  var updateExamAnswersToggle = function() {
+    if (!(examAnswersToggle instanceof HTMLButtonElement)) return;
+    var hasRevealable = window.__examState?.hasRevealable?.() ?? false;
+    var allShown = hasRevealable && (window.__examState?.getAllShown?.() ?? false);
+    var label = allShown ? "隐藏全部答案" : "显示全部答案";
+    var tooltip = hasRevealable ? label : "暂无可显示答案";
+    examAnswersToggle.disabled = !hasRevealable;
+    examAnswersToggle.dataset.state = allShown ? "shown" : "hidden";
+    examAnswersToggle.dataset.tooltip = tooltip;
+    examAnswersToggle.setAttribute("aria-label", label);
+    examAnswersToggle.setAttribute("aria-pressed", "" + allShown);
+  };
+  updateExamAnswersToggle();
+  window.addEventListener(
+    window.__examState?.events?.change ?? "examstatechange",
+    updateExamAnswersToggle,
+  );
+  examAnswersToggle?.addEventListener("click", function() {
+    window.__examState?.toggleAll?.();
+  });
+  requestAnimationFrame(function() { window.__examState?.sync?.(); });
+</script>  </article> </main>  <footer class="mt-10 border-t border-slate-200/80 bg-white/70 dark:border-slate-800 dark:bg-slate-950/70"> <div class="mx-auto flex w-full max-w-6xl flex-col items-center gap-3 px-4 py-5 sm:px-6 lg:px-8"> <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-sm text-slate-500 dark:text-slate-400"> <a class="no-underline text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200" href="https://github.com/byrdocs">GitHub</a> <span class="text-slate-300 dark:text-slate-700">·</span> <a class="no-underline text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200" href="https://byrdocs.org">BYR Docs</a> <span class="text-slate-300 dark:text-slate-700">·</span> <a class="no-underline text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200" href="https://qm.qq.com/cgi-bin/qm/qr?k=plu_KgkqxI4Dw-FwW1aFQDQ0hL062WNV&jump_from=webapi&authKey=09aiBE16MH9jTfmgmGtCjMRsvpazAMkvLcG35mdICYHe2+FKF51qqSIdUC0dVxkh">QQ 群</a> </div> <p class="m-0 text-center text-xs text-slate-400 dark:text-slate-500">
+除非另有声明，本网站内容采用 <a class="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300" href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> 授权。
+</p> </div> </footer> </div> <script>
+          var initExamTocDesktopToggle = function() {
+            var button = document.getElementById("examTocDesktopToggle");
+            if (!(button instanceof HTMLButtonElement))
+              return;
+
+            var storageKey = "exam-toc-desktop-collapsed";
+            var getCollapsed = function() {
+              return document.documentElement.dataset.examTocDesktop === "collapsed";
+            };
+            var syncButton = function() {
+              var collapsed = getCollapsed();
+              button.dataset.state = collapsed ? "collapsed" : "expanded";
+              button.setAttribute("aria-expanded", String(!collapsed));
+              button.setAttribute(
+                "aria-label",
+                collapsed ? "展开目录侧边栏" : "折叠目录侧边栏",
+              );
+            };
+            var setCollapsed = function(collapsed) {
+              document.documentElement.dataset.examTocDesktop = collapsed
+                ? "collapsed"
+                : "expanded";
+              try {
+                window.localStorage.setItem(
+                  storageKey,
+                  collapsed ? "true" : "false",
+                );
+              } catch {}
+              syncButton();
+              window.dispatchEvent(
+                new CustomEvent("examtocdesktopchange", {
+                  detail: { collapsed: collapsed },
+                }),
+              );
+            };
+
+            syncButton();
+            button.addEventListener("click", function() {
+              setCollapsed(!getCollapsed());
+            });
+            window.addEventListener("examtocdesktopchange", syncButton);
+            window.__examTocDesktop = {
+              getCollapsed: getCollapsed,
+              setCollapsed: setCollapsed,
+            };
+          };
+
+          if (document.readyState === "loading")
+            document.addEventListener("DOMContentLoaded", initExamTocDesktopToggle, {
+              once: true,
+            });
+          else
+            initExamTocDesktopToggle();
+        </script> <script>
+      var initHeaderPageTitle = function() {
+        var header = document.querySelector("[data-header-nav]");
+        if (!(header instanceof HTMLElement))
+          return;
+
+        var pageHeading = document.querySelector("[data-page-heading]");
+        if (
+          header.dataset.pageTitleEnabled !== "true" ||
+          !(pageHeading instanceof HTMLElement)
+        ) {
+          header.dataset.titleState = "site";
+          return;
+        }
+
+        var frame = null;
+        var syncHeaderTitleState = function() {
+          frame = null;
+          var headerHeight = header.getBoundingClientRect().height;
+          header.dataset.titleState =
+            pageHeading.getBoundingClientRect().top <= headerHeight
+              ? "page"
+              : "site";
+        };
+        var requestHeaderTitleStateSync = function() {
+          if (frame !== null)
+            return;
+          frame = window.requestAnimationFrame(syncHeaderTitleState);
+        };
+
+        syncHeaderTitleState();
+        window.addEventListener("scroll", requestHeaderTitleStateSync, {
+          passive: true,
+        });
+        window.addEventListener("resize", requestHeaderTitleStateSync);
+      };
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initHeaderPageTitle, {
+          once: true,
+        });
+      } else {
+        initHeaderPageTitle();
+      }
+    </script>  </body></html>

@@ -1,0 +1,283 @@
+<!DOCTYPE html><html lang="zh"> <head><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="apple-touch-icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.44/dist/katex.min.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="generator" content="Astro v6.1.5"><meta name="description" content="BYR Docs 维基真题收录北京邮电大学近年试题，是一个开放、共建、共享的维基网站。"><meta name="keywords" content="北邮,北京邮电大学,考试题目,维基"><meta name="author" content="BYR Docs"><script>
+      const themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
+      const applyTheme = () => {
+        const resolvedTheme = themeMedia.matches ? "dark" : "light";
+        const isDark = resolvedTheme === "dark";
+        document.documentElement.classList.toggle("dark", isDark);
+        document.documentElement.style.colorScheme = resolvedTheme;
+      };
+      applyTheme();
+      themeMedia.addEventListener("change", applyTheme);
+    </script><script>
+      const examStateStorageKeyPrefix = "exam-state:";
+      const examStateTtlMs = 12 * 60 * 60 * 1000;
+      const examStateChangeEvent = "examstatechange";
+      const examStateSetAllEvent = "examsetall";
+      const createEmptyExamState = () => ({
+        blanks: {},
+        solutions: {},
+        choices: {},
+      });
+      const isRecord = (value) =>
+        value !== null && typeof value === "object" && !Array.isArray(value);
+      const normalizeChoiceState = (value) => ({
+        selected: Array.isArray(value?.selected)
+          ? value.selected.filter((item) => typeof item === "string")
+          : [],
+        revealed: value?.revealed === true,
+        mode:
+          value?.mode === "answers" || value?.mode === "checked"
+            ? value.mode
+            : undefined,
+      });
+      const normalizeExamState = (value) => {
+        const state = createEmptyExamState();
+        if (!isRecord(value)) return state;
+        if (isRecord(value.blanks))
+          state.blanks = Object.fromEntries(
+            Object.entries(value.blanks).filter(
+              ([, revealed]) => revealed === true,
+            ),
+          );
+        if (isRecord(value.solutions))
+          state.solutions = Object.fromEntries(
+            Object.entries(value.solutions).filter(([, open]) => open === true),
+          );
+        if (isRecord(value.choices))
+          state.choices = Object.fromEntries(
+            Object.entries(value.choices)
+              .map(([key, choiceState]) => [
+                key,
+                normalizeChoiceState(choiceState),
+              ])
+              .filter(
+                ([, choiceState]) =>
+                  choiceState.revealed === true ||
+                  choiceState.selected.length > 0,
+              ),
+          );
+        return state;
+      };
+      const isExamStateEmpty = (state) =>
+        Object.keys(state.blanks).length === 0 &&
+        Object.keys(state.solutions).length === 0 &&
+        Object.keys(state.choices).length === 0;
+      const getExamStateStorageKey = () =>
+        `${examStateStorageKeyPrefix}${window.location.pathname}`;
+      const removeExamState = () => {
+        try {
+          window.localStorage.removeItem(getExamStateStorageKey());
+        } catch {
+          return;
+        }
+      };
+      const readExamState = () => {
+        try {
+          const raw = window.localStorage.getItem(getExamStateStorageKey());
+          if (!raw) return createEmptyExamState();
+          const parsed = JSON.parse(raw);
+          if (
+            !isRecord(parsed) ||
+            typeof parsed.expiresAt !== "number" ||
+            parsed.expiresAt < Date.now()
+          ) {
+            removeExamState();
+            return createEmptyExamState();
+          }
+          return normalizeExamState(parsed);
+        } catch {
+          removeExamState();
+          return createEmptyExamState();
+        }
+      };
+      const writeExamState = (state) => {
+        const normalizedState = normalizeExamState(state);
+        if (isExamStateEmpty(normalizedState)) {
+          removeExamState();
+          return normalizedState;
+        }
+        try {
+          window.localStorage.setItem(
+            getExamStateStorageKey(),
+            JSON.stringify({
+              expiresAt: Date.now() + examStateTtlMs,
+              ...normalizedState,
+            }),
+          );
+        } catch {
+          return normalizedState;
+        }
+        return normalizedState;
+      };
+      const updateExamState = (updater) =>
+        writeExamState(updater(readExamState()) ?? createEmptyExamState());
+      const getRevealableExamChoiceGroups = () => [
+        ...document.querySelectorAll(".exam-choices[data-has-answer='true']"),
+      ];
+      const hasRevealable = () =>
+        document.querySelector(
+          ".exam-blank[aria-pressed], .exam-solution, .exam-choices[data-has-answer='true']",
+        ) !== null;
+      const getAllShown = () => {
+        if (!hasRevealable()) return false;
+        const blanks = [
+          ...document.querySelectorAll(".exam-blank[aria-pressed]"),
+        ];
+        const solutions = [...document.querySelectorAll(".exam-solution")];
+        const choiceGroups = getRevealableExamChoiceGroups();
+        return (
+          blanks.every(
+            (blank) => blank.getAttribute("aria-pressed") === "true",
+          ) &&
+          solutions.every(
+            (solution) =>
+              solution instanceof HTMLDetailsElement && solution.open,
+          ) &&
+          choiceGroups.every(
+            (group) => group.getAttribute("data-revealed") === "true",
+          )
+        );
+      };
+      const syncExamState = () =>
+        window.dispatchEvent(
+          new CustomEvent(examStateChangeEvent, {
+            detail: {
+              allShown: getAllShown(),
+              hasRevealable: hasRevealable(),
+            },
+          }),
+        );
+      const setAllRevealed = (revealed) =>
+        window.dispatchEvent(
+          new CustomEvent(examStateSetAllEvent, {
+            detail: { revealed },
+          }),
+        );
+      window.__examState = {
+        read: readExamState,
+        update: updateExamState,
+        sync: syncExamState,
+        toggleAll: () => setAllRevealed(!getAllShown()),
+        getAllShown,
+        hasRevealable,
+        events: {
+          change: examStateChangeEvent,
+          setAll: examStateSetAllEvent,
+        },
+      };
+    </script><title>页面不存在 - BYR Docs 维基真题</title><link rel="stylesheet" href="/byrdocs-neowiki/_astro/Layout.B7MUkrao.css"></head> <body> <script>
+      document.addEventListener(
+        "click",
+        (e) => {
+          const a = e.target.closest("a[href]");
+          if (!a) return;
+          const href = a.getAttribute("href");
+          if (href && /^https?:\/\//.test(href)) {
+            a.setAttribute("target", "_blank");
+            a.setAttribute("rel", "noopener noreferrer");
+          }
+        },
+        true,
+      );
+    </script> <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        document.querySelectorAll(".astro-code").forEach((pre) => {
+          const wrapper = document.createElement("div");
+          wrapper.className = "code-block-wrapper";
+          pre.parentNode.insertBefore(wrapper, pre);
+          wrapper.appendChild(pre);
+
+          const toolbar = document.createElement("div");
+          toolbar.className = "code-toolbar";
+
+          const wrapBtn = document.createElement("button");
+          wrapBtn.type = "button";
+          wrapBtn.title = "切换自动换行";
+          wrapBtn.innerHTML =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M3 12h15a3 3 0 1 1 0 6h-4"/><polyline points="13 16 11 18 13 20"/><path d="M3 18h4"/></svg>';
+          wrapBtn.addEventListener("click", () => {
+            const isWrapped = pre.style.whiteSpace === "pre-wrap";
+            pre.style.whiteSpace = isWrapped ? "" : "pre-wrap";
+            pre.style.wordBreak = isWrapped ? "" : "break-all";
+            wrapBtn.style.color = isWrapped ? "" : "#4ade80";
+          });
+
+          const copyBtn = document.createElement("button");
+          copyBtn.type = "button";
+          copyBtn.title = "复制代码";
+          const copyIcon =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+          const checkIcon =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+          copyBtn.innerHTML = copyIcon;
+          copyBtn.addEventListener("click", () => {
+            const code = pre.querySelector("code");
+            const text = code ? code.textContent : pre.textContent;
+            navigator.clipboard.writeText(text || "").then(() => {
+              copyBtn.innerHTML = checkIcon;
+              copyBtn.classList.add("is-copied");
+              toolbar.classList.add("is-active");
+              setTimeout(() => {
+                copyBtn.innerHTML = copyIcon;
+                copyBtn.classList.remove("is-copied");
+                toolbar.classList.remove("is-active");
+              }, 2000);
+            });
+          });
+
+          toolbar.appendChild(wrapBtn);
+          toolbar.appendChild(copyBtn);
+          wrapper.appendChild(toolbar);
+        });
+      });
+    </script> <div class="layout-shell flex min-h-screen flex-col"> <nav class="relative border-b border-slate-200/80 bg-white/85 backdrop-blur dark:border-slate-800 dark:bg-slate-950/80 sticky top-0 z-40" data-header-nav data-page-title-enabled="true" data-title-state="site" data-astro-cid-3ef6ksr2> <div class="layout-container mx-auto flex w-full items-center gap-4 px-4 py-4 sm:px-6 lg:px-8" data-astro-cid-3ef6ksr2> <a class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm no-underline transition hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700" href="/" title="回到首页" data-astro-cid-3ef6ksr2> <img alt="BYR Docs" class="h-7 w-7" src="/favicon.svg" data-astro-cid-3ef6ksr2> </a> <div class="relative min-w-0 flex-1" data-astro-cid-3ef6ksr2> <a class="block truncate text-lg font-semibold tracking-tight text-slate-950 no-underline transition-[opacity,transform] duration-200 hover:text-slate-950 sm:text-2xl dark:text-white dark:hover:text-white" data-header-site-title href="/" data-astro-cid-3ef6ksr2>BYR Docs 维基真题</a> <span aria-hidden="true" class="pointer-events-none absolute inset-0 block truncate text-lg font-semibold tracking-tight text-slate-950 opacity-0 transition-[opacity,transform] duration-200 sm:text-2xl dark:text-white" data-header-page-title data-astro-cid-3ef6ksr2> 页面不存在 </span> </div> <a class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm no-underline transition hover:border-slate-300 hover:text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-slate-700 dark:hover:text-slate-200" href="https://github.com/byrdocs/byrdocs-wiki-internal" aria-label="在 GitHub 上查看 BYR Docs 维基真题仓库" title="GitHub" target="_blank" rel="noopener noreferrer" data-astro-cid-3ef6ksr2> <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" data-astro-cid-3ef6ksr2><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" data-astro-cid-3ef6ksr2></path></svg> </a> </div> </nav> <main class="layout-container mx-auto flex w-full flex-1 px-4 py-6 sm:px-6 lg:px-8 xl:px-16"> <article class="wiki-content min-w-0 flex-1"> <h1 data-page-heading>页面不存在</h1>  <p class="text-lg leading-8 text-slate-700 dark:text-slate-300">
+你访问的页面不存在，可能已被移动或删除。
+</p> <p class="text-base leading-7 text-slate-600 dark:text-slate-400">
+如果你在找某份试卷，可以前往 BYR Docs 主站按课程名、学期或关键词搜索。
+</p> <div class="mt-8 flex flex-wrap items-center gap-3"> <a class="inline-flex items-center justify-center rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white no-underline transition hover:bg-slate-800 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-200" href="https://byrdocs.org">前往 BYR Docs 搜索</a> <a class="inline-flex items-center justify-center rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium text-slate-900 no-underline transition hover:border-slate-400 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-800" href="/">返回首页</a> </div>  </article> </main>  <footer class="mt-10 border-t border-slate-200/80 bg-white/70 dark:border-slate-800 dark:bg-slate-950/70"> <div class="mx-auto flex w-full max-w-6xl flex-col items-center gap-3 px-4 py-5 sm:px-6 lg:px-8"> <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-sm text-slate-500 dark:text-slate-400"> <a class="no-underline text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200" href="https://github.com/byrdocs">GitHub</a> <span class="text-slate-300 dark:text-slate-700">·</span> <a class="no-underline text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200" href="https://byrdocs.org">BYR Docs</a> <span class="text-slate-300 dark:text-slate-700">·</span> <a class="no-underline text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200" href="https://qm.qq.com/cgi-bin/qm/qr?k=plu_KgkqxI4Dw-FwW1aFQDQ0hL062WNV&jump_from=webapi&authKey=09aiBE16MH9jTfmgmGtCjMRsvpazAMkvLcG35mdICYHe2+FKF51qqSIdUC0dVxkh">QQ 群</a> </div> <p class="m-0 text-center text-xs text-slate-400 dark:text-slate-500">
+除非另有声明，本网站内容采用 <a class="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300" href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> 授权。
+</p> </div> </footer> </div>  <script>
+      var initHeaderPageTitle = function() {
+        var header = document.querySelector("[data-header-nav]");
+        if (!(header instanceof HTMLElement))
+          return;
+
+        var pageHeading = document.querySelector("[data-page-heading]");
+        if (
+          header.dataset.pageTitleEnabled !== "true" ||
+          !(pageHeading instanceof HTMLElement)
+        ) {
+          header.dataset.titleState = "site";
+          return;
+        }
+
+        var frame = null;
+        var syncHeaderTitleState = function() {
+          frame = null;
+          var headerHeight = header.getBoundingClientRect().height;
+          header.dataset.titleState =
+            pageHeading.getBoundingClientRect().top <= headerHeight
+              ? "page"
+              : "site";
+        };
+        var requestHeaderTitleStateSync = function() {
+          if (frame !== null)
+            return;
+          frame = window.requestAnimationFrame(syncHeaderTitleState);
+        };
+
+        syncHeaderTitleState();
+        window.addEventListener("scroll", requestHeaderTitleStateSync, {
+          passive: true,
+        });
+        window.addEventListener("resize", requestHeaderTitleStateSync);
+      };
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initHeaderPageTitle, {
+          once: true,
+        });
+      } else {
+        initHeaderPageTitle();
+      }
+    </script>  </body></html>

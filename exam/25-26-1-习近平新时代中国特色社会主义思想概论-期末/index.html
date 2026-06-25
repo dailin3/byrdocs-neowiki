@@ -1,0 +1,1090 @@
+<!DOCTYPE html><html lang="zh"> <head><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="apple-touch-icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.44/dist/katex.min.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="generator" content="Astro v6.1.5"><meta name="description" content="BYR Docs 维基真题收录北京邮电大学近年试题，是一个开放、共建、共享的维基网站。"><meta name="keywords" content="北邮,北京邮电大学,考试题目,维基"><meta name="author" content="BYR Docs"><script>
+      const themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
+      const applyTheme = () => {
+        const resolvedTheme = themeMedia.matches ? "dark" : "light";
+        const isDark = resolvedTheme === "dark";
+        document.documentElement.classList.toggle("dark", isDark);
+        document.documentElement.style.colorScheme = resolvedTheme;
+      };
+      applyTheme();
+      themeMedia.addEventListener("change", applyTheme);
+    </script><script>
+          (() => {
+            const storageKey = "exam-toc-desktop-collapsed";
+            let collapsed = false;
+
+            try {
+              collapsed = window.localStorage.getItem(storageKey) === "true";
+            } catch {}
+
+            document.documentElement.dataset.examTocDesktop = collapsed
+              ? "collapsed"
+              : "expanded";
+          })();
+        </script><script>
+      const examStateStorageKeyPrefix = "exam-state:";
+      const examStateTtlMs = 12 * 60 * 60 * 1000;
+      const examStateChangeEvent = "examstatechange";
+      const examStateSetAllEvent = "examsetall";
+      const createEmptyExamState = () => ({
+        blanks: {},
+        solutions: {},
+        choices: {},
+      });
+      const isRecord = (value) =>
+        value !== null && typeof value === "object" && !Array.isArray(value);
+      const normalizeChoiceState = (value) => ({
+        selected: Array.isArray(value?.selected)
+          ? value.selected.filter((item) => typeof item === "string")
+          : [],
+        revealed: value?.revealed === true,
+        mode:
+          value?.mode === "answers" || value?.mode === "checked"
+            ? value.mode
+            : undefined,
+      });
+      const normalizeExamState = (value) => {
+        const state = createEmptyExamState();
+        if (!isRecord(value)) return state;
+        if (isRecord(value.blanks))
+          state.blanks = Object.fromEntries(
+            Object.entries(value.blanks).filter(
+              ([, revealed]) => revealed === true,
+            ),
+          );
+        if (isRecord(value.solutions))
+          state.solutions = Object.fromEntries(
+            Object.entries(value.solutions).filter(([, open]) => open === true),
+          );
+        if (isRecord(value.choices))
+          state.choices = Object.fromEntries(
+            Object.entries(value.choices)
+              .map(([key, choiceState]) => [
+                key,
+                normalizeChoiceState(choiceState),
+              ])
+              .filter(
+                ([, choiceState]) =>
+                  choiceState.revealed === true ||
+                  choiceState.selected.length > 0,
+              ),
+          );
+        return state;
+      };
+      const isExamStateEmpty = (state) =>
+        Object.keys(state.blanks).length === 0 &&
+        Object.keys(state.solutions).length === 0 &&
+        Object.keys(state.choices).length === 0;
+      const getExamStateStorageKey = () =>
+        `${examStateStorageKeyPrefix}${window.location.pathname}`;
+      const removeExamState = () => {
+        try {
+          window.localStorage.removeItem(getExamStateStorageKey());
+        } catch {
+          return;
+        }
+      };
+      const readExamState = () => {
+        try {
+          const raw = window.localStorage.getItem(getExamStateStorageKey());
+          if (!raw) return createEmptyExamState();
+          const parsed = JSON.parse(raw);
+          if (
+            !isRecord(parsed) ||
+            typeof parsed.expiresAt !== "number" ||
+            parsed.expiresAt < Date.now()
+          ) {
+            removeExamState();
+            return createEmptyExamState();
+          }
+          return normalizeExamState(parsed);
+        } catch {
+          removeExamState();
+          return createEmptyExamState();
+        }
+      };
+      const writeExamState = (state) => {
+        const normalizedState = normalizeExamState(state);
+        if (isExamStateEmpty(normalizedState)) {
+          removeExamState();
+          return normalizedState;
+        }
+        try {
+          window.localStorage.setItem(
+            getExamStateStorageKey(),
+            JSON.stringify({
+              expiresAt: Date.now() + examStateTtlMs,
+              ...normalizedState,
+            }),
+          );
+        } catch {
+          return normalizedState;
+        }
+        return normalizedState;
+      };
+      const updateExamState = (updater) =>
+        writeExamState(updater(readExamState()) ?? createEmptyExamState());
+      const getRevealableExamChoiceGroups = () => [
+        ...document.querySelectorAll(".exam-choices[data-has-answer='true']"),
+      ];
+      const hasRevealable = () =>
+        document.querySelector(
+          ".exam-blank[aria-pressed], .exam-solution, .exam-choices[data-has-answer='true']",
+        ) !== null;
+      const getAllShown = () => {
+        if (!hasRevealable()) return false;
+        const blanks = [
+          ...document.querySelectorAll(".exam-blank[aria-pressed]"),
+        ];
+        const solutions = [...document.querySelectorAll(".exam-solution")];
+        const choiceGroups = getRevealableExamChoiceGroups();
+        return (
+          blanks.every(
+            (blank) => blank.getAttribute("aria-pressed") === "true",
+          ) &&
+          solutions.every(
+            (solution) =>
+              solution instanceof HTMLDetailsElement && solution.open,
+          ) &&
+          choiceGroups.every(
+            (group) => group.getAttribute("data-revealed") === "true",
+          )
+        );
+      };
+      const syncExamState = () =>
+        window.dispatchEvent(
+          new CustomEvent(examStateChangeEvent, {
+            detail: {
+              allShown: getAllShown(),
+              hasRevealable: hasRevealable(),
+            },
+          }),
+        );
+      const setAllRevealed = (revealed) =>
+        window.dispatchEvent(
+          new CustomEvent(examStateSetAllEvent, {
+            detail: { revealed },
+          }),
+        );
+      window.__examState = {
+        read: readExamState,
+        update: updateExamState,
+        sync: syncExamState,
+        toggleAll: () => setAllRevealed(!getAllShown()),
+        getAllShown,
+        hasRevealable,
+        events: {
+          change: examStateChangeEvent,
+          setAll: examStateSetAllEvent,
+        },
+      };
+    </script><title>25-26-1-习近平新时代中国特色社会主义思想概论-期末 - BYR Docs 维基真题</title><style>.related-exams[data-astro-cid-a6434jl4]>summary[data-astro-cid-a6434jl4]::-webkit-details-marker{display:none}.related-exams[data-astro-cid-a6434jl4]>summary[data-astro-cid-a6434jl4]::marker{content:""}.related-exams[data-astro-cid-a6434jl4][open]>summary[data-astro-cid-a6434jl4]{border-bottom:1px solid rgb(226 232 240)}.related-exams[data-astro-cid-a6434jl4][open] .related-exams-chevron[data-astro-cid-a6434jl4]{transform:rotate(180deg)}.dark .related-exams[data-astro-cid-a6434jl4][open]>summary[data-astro-cid-a6434jl4]{border-bottom-color:#1e293b}#examAnswersToggle [data-exam-toggle-icon]{display:none}#examAnswersToggle[data-state=hidden] [data-exam-toggle-icon=show],#examAnswersToggle[data-state=shown] [data-exam-toggle-icon=hide]{display:block}#backToTop{opacity:0;pointer-events:none;transition:opacity .2s ease}#backToTop.is-visible{opacity:1;pointer-events:auto}@media print{@page{margin:2cm 1.5cm}#examToolbar{display:none!important}nav,footer{display:none!important}.exam-blank{background:transparent!important;min-width:0!important}.exam-blank-placeholder{display:none!important}.exam-blank-answer{visibility:visible!important}.exam-blank[aria-pressed=true].exam-blank,.exam-blank[aria-pressed=false].exam-blank{background:transparent!important;box-shadow:0 1px #999!important;border-radius:0!important}.exam-solution{break-inside:avoid;border-radius:12px!important;border:1.5px solid #ccc!important}.exam-solution[open],.exam-solution:not([open]){overflow:visible!important}.exam-solution-summary{display:none!important}.exam-solution-content{display:block!important;padding:1em 1.2em!important}.exam-choices .exam-choice-option[data-answer=true]{outline:1px solid #000!important;outline-offset:-2px;border-radius:8px!important}.exam-choices .exam-choice-option.is-correct .exam-choice-indicator,.exam-choices .exam-choice-option[data-answer=true] .exam-choice-indicator{border-color:#000!important;border-width:2px!important}.exam-choices .exam-choice-option.is-correct .exam-choice-indicator:after,.exam-choices .exam-choice-option[data-answer=true] .exam-choice-indicator:after{background:#000!important;content:""!important;inset:1.5px!important;position:absolute!important}.exam-choices.single .exam-choice-option[data-answer=true] .exam-choice-indicator:after{border-radius:50%!important}.exam-choices-submit{display:none!important}.exam-choice-option{border-color:transparent!important;box-shadow:none!important;padding:.2em .5em!important}.print-footer{display:block!important;margin-top:2em;padding-top:1em;border-top:1px solid #ccc;font-size:.85em;color:#666;line-height:1.8}.print-footer a{color:#444}}
+</style>
+<link rel="stylesheet" href="/byrdocs-neowiki/_astro/exam.Dqi_d8wD.css">
+<link rel="stylesheet" href="/byrdocs-neowiki/_astro/Layout.B7MUkrao.css"></head> <body> <script>
+      document.addEventListener(
+        "click",
+        (e) => {
+          const a = e.target.closest("a[href]");
+          if (!a) return;
+          const href = a.getAttribute("href");
+          if (href && /^https?:\/\//.test(href)) {
+            a.setAttribute("target", "_blank");
+            a.setAttribute("rel", "noopener noreferrer");
+          }
+        },
+        true,
+      );
+    </script> <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        document.querySelectorAll(".astro-code").forEach((pre) => {
+          const wrapper = document.createElement("div");
+          wrapper.className = "code-block-wrapper";
+          pre.parentNode.insertBefore(wrapper, pre);
+          wrapper.appendChild(pre);
+
+          const toolbar = document.createElement("div");
+          toolbar.className = "code-toolbar";
+
+          const wrapBtn = document.createElement("button");
+          wrapBtn.type = "button";
+          wrapBtn.title = "切换自动换行";
+          wrapBtn.innerHTML =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M3 12h15a3 3 0 1 1 0 6h-4"/><polyline points="13 16 11 18 13 20"/><path d="M3 18h4"/></svg>';
+          wrapBtn.addEventListener("click", () => {
+            const isWrapped = pre.style.whiteSpace === "pre-wrap";
+            pre.style.whiteSpace = isWrapped ? "" : "pre-wrap";
+            pre.style.wordBreak = isWrapped ? "" : "break-all";
+            wrapBtn.style.color = isWrapped ? "" : "#4ade80";
+          });
+
+          const copyBtn = document.createElement("button");
+          copyBtn.type = "button";
+          copyBtn.title = "复制代码";
+          const copyIcon =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+          const checkIcon =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+          copyBtn.innerHTML = copyIcon;
+          copyBtn.addEventListener("click", () => {
+            const code = pre.querySelector("code");
+            const text = code ? code.textContent : pre.textContent;
+            navigator.clipboard.writeText(text || "").then(() => {
+              copyBtn.innerHTML = checkIcon;
+              copyBtn.classList.add("is-copied");
+              toolbar.classList.add("is-active");
+              setTimeout(() => {
+                copyBtn.innerHTML = copyIcon;
+                copyBtn.classList.remove("is-copied");
+                toolbar.classList.remove("is-active");
+              }, 2000);
+            });
+          });
+
+          toolbar.appendChild(wrapBtn);
+          toolbar.appendChild(copyBtn);
+          wrapper.appendChild(toolbar);
+        });
+      });
+    </script> <div class="layout-shell flex min-h-screen flex-col" data-has-exam-toc="true"> <nav class="relative border-b border-slate-200/80 bg-white/85 backdrop-blur dark:border-slate-800 dark:bg-slate-950/80 sticky top-0 z-40" data-header-nav data-page-title-enabled="true" data-title-state="site" data-astro-cid-3ef6ksr2> <div class="layout-container mx-auto flex w-full items-center gap-4 px-4 py-4 sm:px-6 lg:px-8" data-astro-cid-3ef6ksr2> <a class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm no-underline transition hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700" href="/" title="回到首页" data-astro-cid-3ef6ksr2> <img alt="BYR Docs" class="h-7 w-7" src="/favicon.svg" data-astro-cid-3ef6ksr2> </a> <div class="relative min-w-0 flex-1" data-astro-cid-3ef6ksr2> <a class="block truncate text-lg font-semibold tracking-tight text-slate-950 no-underline transition-[opacity,transform] duration-200 hover:text-slate-950 sm:text-2xl dark:text-white dark:hover:text-white" data-header-site-title href="/" data-astro-cid-3ef6ksr2>BYR Docs 维基真题</a> <span aria-hidden="true" class="pointer-events-none absolute inset-0 block truncate text-lg font-semibold tracking-tight text-slate-950 opacity-0 transition-[opacity,transform] duration-200 sm:text-2xl dark:text-white" data-header-page-title data-astro-cid-3ef6ksr2> 25-26-1-习近平新时代中国特色社会主义思想概论-期末 </span> </div> <a class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm no-underline transition hover:border-slate-300 hover:text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-slate-700 dark:hover:text-slate-200" href="https://github.com/byrdocs/byrdocs-wiki-internal" aria-label="在 GitHub 上查看 BYR Docs 维基真题仓库" title="GitHub" target="_blank" rel="noopener noreferrer" data-astro-cid-3ef6ksr2> <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" data-astro-cid-3ef6ksr2><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" data-astro-cid-3ef6ksr2></path></svg> </a> </div> </nav> <main class="layout-container mx-auto flex w-full flex-1 px-4 py-6 sm:px-6 lg:px-8 xl:px-16"> <article class="wiki-content min-w-0 flex-1"> <h1 data-page-heading>25-26-1-习近平新时代中国特色社会主义思想概论-期末</h1>  <div class="exam-page-layout"> <aside class="exam-toc-shell" id="examTocShell" data-collapsed="false"><div class="exam-toc-panel"><nav class="exam-toc-nav" id="examTocNav" aria-label="试题目录"> <ol class="exam-toc-list"> <li class="exam-toc-item" data-slug="一单选题请将正确答案的标号写在答题纸上1分20" data-path="一单选题请将正确答案的标号写在答题纸上1分20" data-depth="2"> <div class="exam-toc-row">  <a class="exam-toc-link exam-toc-link-level-1" href="#一单选题请将正确答案的标号写在答题纸上1分20" data-slug="一单选题请将正确答案的标号写在答题纸上1分20" data-path="一单选题请将正确答案的标号写在答题纸上1分20" data-depth="2"> <span class="exam-toc-link-label">一、单选题（请将正确答案的标号写在答题纸上，1分×20）</span> </a> </div>  </li><li class="exam-toc-item" data-slug="二多选题请将正确答案的标号写在答题纸上2分5" data-path="二多选题请将正确答案的标号写在答题纸上2分5" data-depth="2"> <div class="exam-toc-row">  <a class="exam-toc-link exam-toc-link-level-1" href="#二多选题请将正确答案的标号写在答题纸上2分5" data-slug="二多选题请将正确答案的标号写在答题纸上2分5" data-path="二多选题请将正确答案的标号写在答题纸上2分5" data-depth="2"> <span class="exam-toc-link-label">二、多选题（请将正确答案的标号写在答题纸上，2分×5）</span> </a> </div>  </li><li class="exam-toc-item" data-slug="三简答题10分5" data-path="三简答题10分5" data-depth="2" data-expanded="true"> <div class="exam-toc-row">  <a class="exam-toc-link exam-toc-link-level-1" href="#三简答题10分5" data-slug="三简答题10分5" data-path="三简答题10分5" data-depth="2"> <span class="exam-toc-link-label">三、简答题（10分×5）</span> </a> </div> <div class="exam-toc-children"> <div class="exam-toc-children-inner"> <ol class="exam-toc-sublist"> <li class="exam-toc-item" data-slug="1" data-path="三简答题10分5||1" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#1" data-slug="1" data-path="三简答题10分5||1" data-depth="3"> <span class="exam-toc-link-label"> 1. </span> </a> </div> </li><li class="exam-toc-item" data-slug="2" data-path="三简答题10分5||2" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#2" data-slug="2" data-path="三简答题10分5||2" data-depth="3"> <span class="exam-toc-link-label"> 2. </span> </a> </div> </li><li class="exam-toc-item" data-slug="3" data-path="三简答题10分5||3" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#3" data-slug="3" data-path="三简答题10分5||3" data-depth="3"> <span class="exam-toc-link-label"> 3. </span> </a> </div> </li><li class="exam-toc-item" data-slug="4" data-path="三简答题10分5||4" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#4" data-slug="4" data-path="三简答题10分5||4" data-depth="3"> <span class="exam-toc-link-label"> 4. </span> </a> </div> </li><li class="exam-toc-item" data-slug="5" data-path="三简答题10分5||5" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#5" data-slug="5" data-path="三简答题10分5||5" data-depth="3"> <span class="exam-toc-link-label"> 5. </span> </a> </div> </li> </ol> </div> </div> </li><li class="exam-toc-item" data-slug="四论述题20分1" data-path="四论述题20分1" data-depth="2" data-expanded="true"> <div class="exam-toc-row">  <a class="exam-toc-link exam-toc-link-level-1" href="#四论述题20分1" data-slug="四论述题20分1" data-path="四论述题20分1" data-depth="2"> <span class="exam-toc-link-label">四、论述题（20分×1）</span> </a> </div> <div class="exam-toc-children"> <div class="exam-toc-children-inner"> <ol class="exam-toc-sublist"> <li class="exam-toc-item" data-slug="1-1" data-path="四论述题20分1||1-1" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#1-1" data-slug="1-1" data-path="四论述题20分1||1-1" data-depth="3"> <span class="exam-toc-link-label"> 1. </span> </a> </div> </li><li class="exam-toc-item" data-slug="2-1" data-path="四论述题20分1||2-1" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#2-1" data-slug="2-1" data-path="四论述题20分1||2-1" data-depth="3"> <span class="exam-toc-link-label"> 2. </span> </a> </div> </li> </ol> </div> </div> </li> </ol> </nav></div><button class="exam-toc-desktop-trigger inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-r-xl border border-slate-200 border-l-0 bg-white text-slate-500 shadow-sm transition hover:border-slate-300 hover:text-slate-700 dark:border-slate-800 dark:border-l-0 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-slate-700 dark:hover:text-slate-200" id="examTocDesktopToggle" type="button" aria-label="展开目录侧边栏" aria-expanded="true"><svg aria-hidden="true" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h16"></path></svg></button></aside><div class="exam-toc-mobile" id="examTocMobile" data-open="false"><button class="exam-toc-mobile-backdrop" id="examTocMobileBackdrop" type="button" aria-label="关闭目录"></button><div class="exam-toc-mobile-panel" id="examTocMobilePanel"><div class="exam-toc-mobile-header"><p class="exam-toc-mobile-title">目录</p></div><nav class="exam-toc-nav exam-toc-nav-mobile" id="examTocMobileNav" aria-label="试题目录"> <ol class="exam-toc-list"> <li class="exam-toc-item" data-slug="一单选题请将正确答案的标号写在答题纸上1分20" data-path="一单选题请将正确答案的标号写在答题纸上1分20" data-depth="2"> <div class="exam-toc-row"> <span class="exam-toc-branch-spacer" aria-hidden="true"></span> <a class="exam-toc-link exam-toc-link-level-1" href="#一单选题请将正确答案的标号写在答题纸上1分20" data-slug="一单选题请将正确答案的标号写在答题纸上1分20" data-path="一单选题请将正确答案的标号写在答题纸上1分20" data-depth="2"> <span class="exam-toc-link-label">一、单选题（请将正确答案的标号写在答题纸上，1分×20）</span> </a> </div>  </li><li class="exam-toc-item" data-slug="二多选题请将正确答案的标号写在答题纸上2分5" data-path="二多选题请将正确答案的标号写在答题纸上2分5" data-depth="2"> <div class="exam-toc-row"> <span class="exam-toc-branch-spacer" aria-hidden="true"></span> <a class="exam-toc-link exam-toc-link-level-1" href="#二多选题请将正确答案的标号写在答题纸上2分5" data-slug="二多选题请将正确答案的标号写在答题纸上2分5" data-path="二多选题请将正确答案的标号写在答题纸上2分5" data-depth="2"> <span class="exam-toc-link-label">二、多选题（请将正确答案的标号写在答题纸上，2分×5）</span> </a> </div>  </li><li class="exam-toc-item" data-slug="三简答题10分5" data-path="三简答题10分5" data-depth="2" data-expanded="false"> <div class="exam-toc-row"> <button class="exam-toc-branch-toggle" type="button" aria-label="展开或折叠三、简答题（10分×5）" aria-expanded="false" data-branch-toggle="三简答题10分5"> <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"> <path d="m9 18 6-6-6-6"></path> </svg> </button> <a class="exam-toc-link exam-toc-link-level-1" href="#三简答题10分5" data-slug="三简答题10分5" data-path="三简答题10分5" data-depth="2"> <span class="exam-toc-link-label">三、简答题（10分×5）</span> </a> </div> <div class="exam-toc-children"> <div class="exam-toc-children-inner"> <ol class="exam-toc-sublist"> <li class="exam-toc-item" data-slug="1" data-path="三简答题10分5||1" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#1" data-slug="1" data-path="三简答题10分5||1" data-depth="3"> <span class="exam-toc-link-label"> 1. </span> </a> </div> </li><li class="exam-toc-item" data-slug="2" data-path="三简答题10分5||2" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#2" data-slug="2" data-path="三简答题10分5||2" data-depth="3"> <span class="exam-toc-link-label"> 2. </span> </a> </div> </li><li class="exam-toc-item" data-slug="3" data-path="三简答题10分5||3" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#3" data-slug="3" data-path="三简答题10分5||3" data-depth="3"> <span class="exam-toc-link-label"> 3. </span> </a> </div> </li><li class="exam-toc-item" data-slug="4" data-path="三简答题10分5||4" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#4" data-slug="4" data-path="三简答题10分5||4" data-depth="3"> <span class="exam-toc-link-label"> 4. </span> </a> </div> </li><li class="exam-toc-item" data-slug="5" data-path="三简答题10分5||5" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#5" data-slug="5" data-path="三简答题10分5||5" data-depth="3"> <span class="exam-toc-link-label"> 5. </span> </a> </div> </li> </ol> </div> </div> </li><li class="exam-toc-item" data-slug="四论述题20分1" data-path="四论述题20分1" data-depth="2" data-expanded="false"> <div class="exam-toc-row"> <button class="exam-toc-branch-toggle" type="button" aria-label="展开或折叠四、论述题（20分×1）" aria-expanded="false" data-branch-toggle="四论述题20分1"> <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"> <path d="m9 18 6-6-6-6"></path> </svg> </button> <a class="exam-toc-link exam-toc-link-level-1" href="#四论述题20分1" data-slug="四论述题20分1" data-path="四论述题20分1" data-depth="2"> <span class="exam-toc-link-label">四、论述题（20分×1）</span> </a> </div> <div class="exam-toc-children"> <div class="exam-toc-children-inner"> <ol class="exam-toc-sublist"> <li class="exam-toc-item" data-slug="1-1" data-path="四论述题20分1||1-1" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#1-1" data-slug="1-1" data-path="四论述题20分1||1-1" data-depth="3"> <span class="exam-toc-link-label"> 1. </span> </a> </div> </li><li class="exam-toc-item" data-slug="2-1" data-path="四论述题20分1||2-1" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#2-1" data-slug="2-1" data-path="四论述题20分1||2-1" data-depth="3"> <span class="exam-toc-link-label"> 2. </span> </a> </div> </li> </ol> </div> </div> </li> </ol> </nav></div></div><script>
+  var initExamToc = function() {
+    var tocShell = document.getElementById("examTocShell");
+    var tocNav = document.getElementById("examTocNav");
+    var mobileRoot = document.getElementById("examTocMobile");
+    var mobilePanel = document.getElementById("examTocMobilePanel");
+    var mobileBackdrop = document.getElementById("examTocMobileBackdrop");
+    var mobileToggle = document.getElementById("examTocMobileToggle");
+
+    if (
+      !(tocShell instanceof HTMLElement) &&
+      !(mobileRoot instanceof HTMLElement)
+    ) {
+      return;
+    }
+
+    var tocLinks = Array.from(
+      document.querySelectorAll(".exam-toc-link[data-slug]"),
+    ).filter(function(link) {
+      return link instanceof HTMLAnchorElement;
+    });
+    var desktopItems = Array.from(
+      tocShell?.querySelectorAll(".exam-toc-item[data-slug]") || [],
+    ).filter(function(item) {
+      return item instanceof HTMLElement;
+    });
+    var mobileItems = Array.from(
+      mobileRoot?.querySelectorAll(".exam-toc-item[data-slug]") || [],
+    ).filter(function(item) {
+      return item instanceof HTMLElement;
+    });
+    var mobileBranchButtons = Array.from(
+      mobileRoot?.querySelectorAll(".exam-toc-branch-toggle[data-branch-toggle]") ||
+        [],
+    ).filter(function(button) {
+      return button instanceof HTMLButtonElement;
+    });
+
+    var setMobileOpen = function(open) {
+      if (!(mobileRoot instanceof HTMLElement))
+        return;
+
+      mobileRoot.dataset.open = open ? "true" : "false";
+
+      if (mobileToggle instanceof HTMLButtonElement) {
+        mobileToggle.setAttribute("aria-expanded", String(open));
+        mobileToggle.setAttribute("aria-label", open ? "隐藏目录" : "显示目录");
+      }
+    };
+    var syncDesktopVisibility = function() {
+      if (!(tocShell instanceof HTMLElement))
+        return;
+
+      var collapsed =
+        document.documentElement.dataset.examTocDesktop === "collapsed";
+      tocShell.dataset.collapsed = collapsed ? "true" : "false";
+      if (tocNav instanceof HTMLElement) {
+        tocNav.setAttribute("aria-hidden", String(collapsed));
+      }
+    };
+
+    var setBranchExpanded = function(items, buttons, slug, expanded) {
+      items.forEach(function(item) {
+        if (
+          !(item instanceof HTMLElement) ||
+          item.dataset.slug !== slug ||
+          item.querySelector(".exam-toc-children") === null
+        ) {
+          return;
+        }
+
+        item.dataset.expanded = expanded ? "true" : "false";
+      });
+
+      buttons.forEach(function(button) {
+        if (
+          !(button instanceof HTMLButtonElement) ||
+          button.dataset.branchToggle !== slug
+        ) {
+          return;
+        }
+
+        button.setAttribute("aria-expanded", String(expanded));
+      });
+    };
+    var setAllDesktopBranchesExpanded = function() {
+      desktopItems.forEach(function(item) {
+        if (
+          !(item instanceof HTMLElement) ||
+          item.querySelector(".exam-toc-children") === null
+        ) {
+          return;
+        }
+
+        item.dataset.expanded = "true";
+      });
+    };
+
+    syncDesktopVisibility();
+    setMobileOpen(false);
+    setAllDesktopBranchesExpanded();
+
+    var mobileManualState = {};
+    var mobileAutoExpanded = {};
+
+    var syncMobileBranch = function(slug) {
+      var manual = mobileManualState[slug];
+      var auto = mobileAutoExpanded[slug] || false;
+      var expanded;
+      if (manual === false) {
+        expanded = false;
+      } else if (manual === true || auto) {
+        expanded = true;
+      } else {
+        expanded = false;
+      }
+      setBranchExpanded(mobileItems, mobileBranchButtons, slug, expanded);
+    };
+
+    var syncAllMobileBranches = function() {
+      mobileItems.forEach(function(item) {
+        if (!(item instanceof HTMLElement) || !item.dataset.slug)
+          return;
+        if (item.querySelector(".exam-toc-children") === null)
+          return;
+        syncMobileBranch(item.dataset.slug);
+      });
+    };
+
+    mobileItems.forEach(function(item) {
+      if (!(item instanceof HTMLElement) || !item.dataset.slug)
+        return;
+      var initialExpanded = item.dataset.expanded === "true";
+      if (initialExpanded) {
+        mobileManualState[item.dataset.slug] = true;
+      }
+      setBranchExpanded(
+        mobileItems,
+        mobileBranchButtons,
+        item.dataset.slug,
+        initialExpanded,
+      );
+    });
+    window.addEventListener("examtocdesktopchange", syncDesktopVisibility);
+
+    mobileToggle?.addEventListener("click", function(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      setMobileOpen(mobileRoot?.dataset.open !== "true");
+    });
+
+    mobileBackdrop?.addEventListener("click", function() {
+      setMobileOpen(false);
+    });
+
+    mobilePanel?.addEventListener("click", function(event) {
+      event.stopPropagation();
+    });
+
+    document.addEventListener("click", function(event) {
+      if (!(mobileRoot instanceof HTMLElement) || mobileRoot.dataset.open !== "true")
+        return;
+      if (mobilePanel instanceof HTMLElement && mobilePanel.contains(event.target))
+        return;
+      if (mobileToggle instanceof HTMLElement && mobileToggle.contains(event.target))
+        return;
+      setMobileOpen(false);
+    });
+
+    document.addEventListener("keydown", function(event) {
+      if (event.key === "Escape")
+        setMobileOpen(false);
+    });
+
+    mobileBranchButtons.forEach(function(button) {
+      if (!(button instanceof HTMLButtonElement))
+        return;
+
+      button.addEventListener("click", function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        var slug = button.dataset.branchToggle;
+        if (!slug)
+          return;
+
+        var matchingItem = mobileItems.find(function(item) {
+          return (
+            item instanceof HTMLElement &&
+            item.dataset.slug === slug &&
+            item.querySelector(".exam-toc-children") !== null
+          );
+        });
+
+        var isCurrentlyExpanded = matchingItem?.dataset.expanded === "true";
+        mobileManualState[slug] = !isCurrentlyExpanded;
+        syncMobileBranch(slug);
+      });
+    });
+
+    if (tocLinks.length === 0)
+      return;
+
+    var seenSlugs = {};
+    var headingEntries = tocLinks
+      .map(function(link) {
+        if (!(link instanceof HTMLAnchorElement))
+          return null;
+
+        var slug = link.dataset.slug;
+        if (!slug || seenSlugs[slug])
+          return null;
+
+        var heading = document.getElementById(slug);
+        if (!(heading instanceof HTMLElement))
+          return null;
+
+        seenSlugs[slug] = true;
+        return {
+          slug: slug,
+          path: (link.dataset.path || slug).split("||").filter(Boolean),
+          heading: heading,
+        };
+      })
+      .filter(function(entry) {
+        return entry !== null;
+      });
+
+    if (headingEntries.length === 0)
+      return;
+
+    var activationOffset = 140;
+    var headingEntriesBySlug = {};
+    headingEntries.forEach(function(entry) {
+      headingEntriesBySlug[entry.slug] = entry;
+    });
+    var lastActiveSlug = "";
+    var programmaticScrollState = null;
+    var programmaticScrollFrame = 0;
+    var applyTocState = function(activeEntry) {
+      var activeSlug = activeEntry.slug;
+      var activePath = activeEntry.path;
+
+      tocLinks.forEach(function(link) {
+        if (!(link instanceof HTMLAnchorElement))
+          return;
+
+        var slug = link.dataset.slug || "";
+        var isActive = slug === activeSlug;
+        var isInPath = activePath.indexOf(slug) >= 0;
+
+        link.classList.toggle("is-active", isActive);
+        link.classList.toggle("is-in-path", isInPath && !isActive);
+
+        if (isActive)
+          link.setAttribute("aria-current", "location");
+        else
+          link.removeAttribute("aria-current");
+      });
+
+      setAllDesktopBranchesExpanded();
+
+      var newAutoExpanded = {};
+      activePath.forEach(function(slug) {
+        newAutoExpanded[slug] = true;
+      });
+      // Clear manual state for slugs whose auto state changed
+      mobileItems.forEach(function(item) {
+        if (!(item instanceof HTMLElement) || !item.dataset.slug)
+          return;
+        if (item.querySelector(".exam-toc-children") === null)
+          return;
+        var slug = item.dataset.slug;
+        var wasAuto = mobileAutoExpanded[slug] || false;
+        var isAuto = newAutoExpanded[slug] || false;
+        if (wasAuto !== isAuto) {
+          delete mobileManualState[slug];
+        }
+      });
+      mobileAutoExpanded = newAutoExpanded;
+      syncAllMobileBranches();
+
+      if (activeSlug !== lastActiveSlug) {
+        tocLinks.forEach(function(link) {
+          if (
+            !(link instanceof HTMLAnchorElement) ||
+            link.dataset.slug !== activeSlug
+          ) {
+            return;
+          }
+
+          var inMobile = link.closest(".exam-toc-mobile") !== null;
+          var inDesktop = link.closest(".exam-toc-shell") !== null;
+
+          if (inMobile && mobileRoot?.dataset.open !== "true")
+            return;
+          if (inDesktop && tocShell?.dataset.collapsed === "true")
+            return;
+
+          link.scrollIntoView({
+            block: "nearest",
+            inline: "nearest",
+          });
+        });
+
+        lastActiveSlug = activeSlug;
+      }
+    };
+    var syncTocState = function() {
+      var activeEntry = headingEntries[0];
+
+      for (var i = 0; i < headingEntries.length; i++) {
+        if (headingEntries[i].heading.getBoundingClientRect().top <= activationOffset)
+          activeEntry = headingEntries[i];
+        else
+          break;
+      }
+
+      applyTocState(activeEntry);
+    };
+    var clearProgrammaticScroll = function() {
+      if (programmaticScrollFrame) {
+        window.cancelAnimationFrame(programmaticScrollFrame);
+        programmaticScrollFrame = 0;
+      }
+      programmaticScrollState = null;
+    };
+    var watchProgrammaticScroll = function() {
+      if (!programmaticScrollState || programmaticScrollFrame)
+        return;
+
+      programmaticScrollFrame = window.requestAnimationFrame(function() {
+        programmaticScrollFrame = 0;
+
+        if (!programmaticScrollState)
+          return;
+
+        var elapsed = Date.now() - programmaticScrollState.startedAt;
+        var distance = Math.abs(
+          programmaticScrollState.heading.getBoundingClientRect().top -
+            activationOffset,
+        );
+
+        if (distance <= 6 || elapsed >= 1200) {
+          clearProgrammaticScroll();
+          requestSync();
+          return;
+        }
+
+        watchProgrammaticScroll();
+      });
+    };
+    var syncFrame = 0;
+    var requestSync = function() {
+      if (programmaticScrollState) {
+        watchProgrammaticScroll();
+        return;
+      }
+      if (syncFrame)
+        return;
+
+      syncFrame = window.requestAnimationFrame(function() {
+        syncFrame = 0;
+        syncTocState();
+      });
+    };
+
+    tocLinks.forEach(function(link) {
+      if (!(link instanceof HTMLAnchorElement))
+        return;
+
+      link.addEventListener("click", function(event) {
+        var slug = link.dataset.slug || "";
+        var entry = headingEntriesBySlug[slug];
+
+        setMobileOpen(false);
+
+        if (!entry)
+          return;
+
+        event.preventDefault();
+        applyTocState(entry);
+        programmaticScrollState = {
+          slug: entry.slug,
+          heading: entry.heading,
+          startedAt: Date.now(),
+        };
+
+        if (window.history && typeof window.history.pushState === "function") {
+          window.history.pushState(null, "", "#" + entry.slug);
+        } else {
+          window.location.hash = entry.slug;
+        }
+
+        entry.heading.scrollIntoView({
+          block: "start",
+          behavior: "smooth",
+        });
+        watchProgrammaticScroll();
+      });
+    });
+
+    syncTocState();
+    window.addEventListener("scroll", requestSync, { passive: true });
+    window.addEventListener("resize", requestSync, { passive: true });
+    window.addEventListener("hashchange", requestSync);
+    window.addEventListener("load", syncTocState);
+    window.addEventListener("examtocdesktopchange", syncTocState);
+  };
+
+  if (document.readyState === "loading")
+    document.addEventListener("DOMContentLoaded", initExamToc, { once: true });
+  else
+    initExamToc();
+</script> <div class="exam-page-main"> <aside class="mb-6 overflow-hidden rounded-[8px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:float-right lg:mb-8 lg:ml-6 lg:w-[22rem]"> <div class="border-b border-slate-200 px-4 py-3 dark:border-slate-800"> <p class="m-0 text-sm font-semibold tracking-wide text-slate-600 dark:text-slate-300">
+试题信息
+</p> </div> <dl class="divide-y divide-slate-200 text-sm dark:divide-slate-800"> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">时间</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> 2025-2026学年第一学期 </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">科目</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> <a href="https://byrdocs.org/?c=test&#38;q=习近平新时代中国特色社会主义思想概论">习近平新时代中国特色社会主义思想概论</a> </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">阶段</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> 期末 </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">类型</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> 本科 </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">学院</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> 人文学院、智能工程与自动化学院、集成电路学院、计算机学院（国家示范性软件学院）、电子工程学院、国际学院 </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">来源</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> <a href="https://byrdocs.org/?c=test&#38;q=81da7d2fd263097d13fdbbd7bf0a81f8" target="_blank">
+BYR Docs 文件
+</a> </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">答案完成度</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> <span class="font-semibold text-fuchsia-600 dark:text-fuchsia-400">完整</span> </dd> </div> </dl> </aside>  <h2 id="一单选题请将正确答案的标号写在答题纸上1分20">一、单选题（请将正确答案的标号写在答题纸上，1分×20）</h2>
+<ol>
+<li>在深刻总结中国特色社会主义发展成就和历史经验的基础上，党的十九大作出重大政治判断，指出我国社会主要矛盾已经发生历史性变化。新时代我国社会主要矛盾是<span class="exam-slot">(  )</span>。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">人民日益增长的物质文化需要和落后的社会生产之间的矛盾</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">人民日益增长的美好生活需要和不平衡不充分的发展之间的矛盾</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">经济快速发展与资源环境约束之间的矛盾</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">改革开放需求与体制机制滞后之间的矛盾</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> <script type="module">const x=c=>String.fromCharCode(65+c),C=document.querySelectorAll(".exam-choices:not([data-exam-choices-ready])");C.forEach((c,S)=>{if(!(c instanceof HTMLFieldSetElement))return;c.setAttribute("data-exam-choices-ready","true");const b=c.getAttribute("data-multiple")==="true",i=[...c.querySelectorAll(".exam-choice-option")],r=c.querySelector(".exam-choices-submit"),d=i.some(e=>e.getAttribute("data-answer")==="true"),u=`choice:${S}`,o=window.__examState,y=`exam-choices-${S}`;if(c.setAttribute("data-has-answer",d?"true":"false"),c.setAttribute("data-revealed","false"),i.forEach((e,t)=>{const s=x(t);e.setAttribute("data-choice",s);const a=e.querySelector(".exam-choice-input"),n=e.querySelector(".exam-choice-letter");a instanceof HTMLInputElement&&(a.type=b?"checkbox":"radio",a.name=y,a.value=s),n&&(n.textContent=`${s}.`)}),!(r instanceof HTMLButtonElement))return;const h=()=>{i.forEach(e=>e.classList.remove("is-correct","is-wrong","is-missed")),r.classList.remove("is-all-correct","is-not-all-correct")},E=()=>i.flatMap(e=>{const t=e.querySelector(".exam-choice-input"),s=e.getAttribute("data-choice")??"";return t instanceof HTMLInputElement&&t.checked&&s?[s]:[]}),l=(e,t)=>{o?.update?.(s=>{const a={...s.choices},n=E();return!e&&n.length===0?delete a[u]:a[u]={selected:n,revealed:e,mode:e?t:void 0},{...s,choices:a}}),o?.sync?.()},L=e=>{const t=new Set(e);i.forEach(s=>{const a=s.querySelector(".exam-choice-input"),n=s.getAttribute("data-choice")??"";a instanceof HTMLInputElement&&(a.checked=t.has(n))})},v=()=>{h(),c.setAttribute("data-revealed","false"),c.removeAttribute("data-reveal-mode"),l(!1)},f=()=>{let e=!0;h(),i.forEach(t=>{const s=t.querySelector(".exam-choice-input"),a=t.getAttribute("data-answer")==="true",n=s instanceof HTMLInputElement&&s.checked;a?n?t.classList.add("is-correct"):(t.classList.add("is-missed"),e=!1):n&&(t.classList.add("is-wrong"),e=!1)}),r.classList.add(e?"is-all-correct":"is-not-all-correct"),c.setAttribute("data-revealed","true"),c.setAttribute("data-reveal-mode","checked"),l(!0,"checked")},m=()=>{h(),i.forEach(e=>{const t=e.querySelector(".exam-choice-input"),s=e.getAttribute("data-answer")==="true",a=t instanceof HTMLInputElement&&t.checked;s?e.classList.add("is-correct"):a&&e.classList.add("is-wrong")}),c.setAttribute("data-revealed","true"),c.setAttribute("data-reveal-mode","answers"),l(!0,"answers")},A=()=>{const e=o?.read?.().choices?.[u];e&&L(e.selected),!(!d||!e?.revealed)&&(e.mode==="answers"?m():f())},w=()=>{const e=c.getAttribute("data-reveal-mode");c.getAttribute("data-revealed")!=="true"?l(!1):e==="answers"?m():f()};if(!d){r.disabled=!0,r.textContent="暂无答案",A(),i.forEach(e=>{const t=e.querySelector(".exam-choice-input");t instanceof HTMLInputElement&&t.addEventListener("change",()=>l(!1))}),o?.sync?.();return}A(),i.forEach(e=>{const t=e.querySelector(".exam-choice-input");t instanceof HTMLInputElement&&t.addEventListener("change",w)}),r.addEventListener("click",f),window.addEventListener(o?.events?.setAll??"examsetall",e=>{e instanceof CustomEvent&&e.detail?.revealed===!0?m():v()}),o?.sync?.()});</script>
+<ol start="2">
+<li>习近平新时代中国特色社会主义思想实现了马克思主义中国化时代化新的飞跃，其科学定位是<span class="exam-slot">(  )</span>。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">新时代中国的行动纲领</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">当代中国马克思主义、二十一世纪马克思主义</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">中国社会主义理论体系的重要组成</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">中国特色社会主义制度的理论基础</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="3">
+<li>党的二十大报告明确指出，新时代新征程中国共产党的中心任务，是团结带领全国各族人民，全面建成社会主义现代化强国，以中国式现代化<span class="exam-slot">(  )</span>。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">实现中华民族伟大复兴</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">推动经济高质量发展</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">实现人民共同富裕</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">建设创新型国家</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="4">
+<li>习近平总书记指出，坚持和加强党的全面领导，是坚持和发展中国特色社会主义的根本保证。下列关于党的全面领导的表述中，最准确的一项是<span class="exam-slot">(  )</span>。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">党主要在政治上发挥指导作用</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">党只在重大问题上发挥决策作用</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">党对一切工作实行全面领导</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">党主要通过行政系统行使权力</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="5">
+<li>习近平总书记指出，中国共产党根基在人民、血脉在人民、力量在人民。因此，新时代坚持以人民为中心的发展思想，其根本出发点和落脚点在于<span class="exam-slot">(  )</span>。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">不断实现人民对美好生活的向往</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">提高国家综合实力</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">扩大中等收入群体规模</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">推进经济高质量发展</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="6">
+<li>新时代全面深化改革的总目标，是通过系统推进各领域改革，不断完善和发展中国特色社会主义制度，进一步推进<span class="exam-slot">(  )</span>。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">市场资源配置优化</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">国家治理体系和治理能力现代化</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">经济全球化</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">自由贸易体系建设</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="7">
+<li>当前我国经济由高速增长阶段转向高质量发展阶段，其根本要求是从规模速度型增长转向<span class="exam-slot">(  )</span>型发展。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">要素投入</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">投资拉动</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">资源消耗</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">质量效益</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="8">
+<li>习近平总书记指出，全过程人民民主是一种全链条、全方位、全覆盖的民主，其本质是<span class="exam-slot">(  )</span>。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">法治民主</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">协商民主</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">人民当家作主</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">间接民主</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="9">
+<li>全面依法治国是国家治理的一场深刻革命，其总目标是建设中国特色社会主义法治体系，建设<span class="exam-slot">(  )</span>。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">社会主义法治国家</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">法律强国</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">司法强国</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">民主法治国家</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="10">
+<li>习近平总书记指出，文化自信是一个国家、一个民族发展中最基础、最广泛、最深厚的自信。增强文化自信，必须坚持以<span class="exam-slot">(  )</span>为根本指导，在多元文化激荡中牢牢掌握意识形态工作领导权。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">中华优秀传统文化</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">中国革命文化</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">当代世界先进文化</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">马克思主义</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="11">
+<li>习近平总书记指出，要弘扬以<span class="exam-slot">(  )</span>为源头的中国共产党人精神谱系，不断筑牢全民族的精神支柱和精神力量，为推进中国式现代化提供强大思想保证和精神动力。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">延安精神</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">红色文化精神</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">革命精神</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">伟大建党精神</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="12">
+<li>习近平总书记指出，民生是人民幸福之基，是社会和谐之本。新时代加强社会建设，必须把保障和改善民生作为<span class="exam-slot">(  )</span>。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">发展基础</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">战略支点</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">根本出发点和落脚点</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">制度根本</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="13">
+<li>习近平生态文明思想强调，生态环境保护不是权宜之计，而是关系中华民族永续发展的根本大计，必须牢固树立<span class="exam-slot">(  )</span>理念。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">经济优先发展</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">生态文明优先</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">绿水青山就是金山银山</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">协调发展</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="14">
+<li>总体国家安全观强调统筹发展和安全，要求坚持系统思维，把国家安全贯穿党和国家工作各方面全过程，形成<span class="exam-slot">(  )</span>的国家安全体系。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">把经济安全作为中心</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">把军事安全作为核心</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">把政治安全放在首要位置</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">把文化安全作为基础</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="15">
+<li>习近平总书记指出，强国必须强军，军强才能国安。新时代强军目标要求把人民军队建设成为<span class="exam-slot">(  )</span>的人民军队。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">技术一流</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">听觉指挥、能打胜仗、作风优良</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">高度职业化</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">区域安全维护力量</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="16">
+<li>习近平总书记强调，解决台湾问题、实现祖国完全统一，是全体中华儿女的共同愿望，是中华民族根本利益所在，必须始终坚持<span class="exam-slot">(  )</span>原则。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">和平共处</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">一个中国</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">各表一中</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">两制并存</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="17">
+<li>习近平总书记在多次国际场合指出，面对全球性挑战，中国倡导构建人类命运共同体，其核心理念是坚持<span class="exam-slot">(  )</span>。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">强权政治逻辑</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">零和博弈思想</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">相互尊重、公平正义、合作共赢</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">国际干预原则</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="18">
+<li>习近平总书记指出，打铁必须自身硬，治党必须从严。<span class="exam-slot">(  )</span>是新时代推进反腐败斗争的鲜明特征。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">从思想上入手</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">标本兼治</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">严惩腐败</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">以德治党</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="19">
+<li>党的二十届四中全会指出，加快经济社会发展全面绿色转型，建设美丽中国，要以<span class="exam-slot">(  )</span>为牵引，协同推进降碳、减污、扩绿、增长。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">可持续发展战略</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">高质量发展</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">碳达峰碳中和</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">新型城镇化</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="20">
+<li>党的二十届四中全会明确指出，要通过深化制度创新、拓展开放空间，稳步扩大<span class="exam-slot">(  )</span>，以开放促改革、促发展，推动形成更高水平的对外开放新格局。</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">要素型开放</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">制度型开放</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">区域型开放</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">服务型开放</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<h2 id="二多选题请将正确答案的标号写在答题纸上2分5">二、多选题（请将正确答案的标号写在答题纸上，2分×5）</h2>
+<ol>
+<li>党的二十届四中全会在分析当前形势和任务时，围绕推进国家安全体系和能力现代化、扎实维护社会稳定和公共安全进行了系统部署，同时在安全生产、社会治理、意识形态风险防控等方面提出了明确要求。根据相关表述，下列选项中符合全会精神的有<span class="exam-slot">(  )</span>。</li>
+</ol>
+<fieldset class="exam-choices multiple" data-multiple="true">  <div class="exam-choices-options"> <label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">强调贯彻总体国家安全观，健全国家安全体系，提升重点领域国家安全能力，确保社会生机勃勃又井然有序</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">要压紧压实安全生产责任，严格落实监管制度，坚决防范和遏制重特大事故发生，同时强化食品药品全链条监管</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">明确提出应以经济安全为核心, 其他领域安全工作围绕经济建设利益作适度让步</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">要深入排查化解矛盾纠纷，加强社会治安整体防控，依法打击各类违法犯罪，并加强舆论引导、防范意识形态风险</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="2">
+<li>坚持党的全面领导，是中国特色社会主义最本质特征，是中国特色社会主义制度的最大优势，具体体现在<span class="exam-slot">(  )</span>。</li>
+</ol>
+<fieldset class="exam-choices multiple" data-multiple="true">  <div class="exam-choices-options"> <label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">党对经济工作的领导</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">党对意识形态工作的领导</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">党对军队的绝对领导</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">党对一切工作的领导</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="3">
+<li>习近平总书记指出，必须坚持以人民为中心的发展思想。其内涵包括<span class="exam-slot">(  )</span>。</li>
+</ol>
+<fieldset class="exam-choices multiple" data-multiple="true">  <div class="exam-choices-options"> <label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">把人民对美好生活的向往作为奋斗目标</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">始终把最广大人民根本利益放在首位</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">依靠人民创造历史伟业</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">将社会管理完全交由市场调节</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="4">
+<li>习近平总书记指出：“全面深化改革，全面者，就是要统筹推进各领域改革，就需要有管总的目标，也要回答推进各领域改革最终是为了什么、要取得什么样的整体结果这个问题。”全面深化改革总目标是<span class="exam-slot">(  )</span>。</li>
+</ol>
+<fieldset class="exam-choices multiple" data-multiple="true">  <div class="exam-choices-options"> <label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">完善和发展中国特色社会主义制度</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">推进国家治理体系和治理能力现代化</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">构建更加开放的国际经济体系</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">推动人民代表大会制度自我完善和发展</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="5">
+<li>全过程人民民主是新时代我国民主政治的重大理论创新，其主要特征包括<span class="exam-slot">(  )</span>。</li>
+</ol>
+<fieldset class="exam-choices multiple" data-multiple="true">  <div class="exam-choices-options"> <label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">全链条民主</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">全方位民主</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">全覆盖民主</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">全领域民主</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<h2 id="三简答题10分5">三、简答题（10分×5）</h2>
+<h3 id="1">1.</h3>
+<p>简述如何理解“两个结合”是对坚持和发展马克思主义作出的重大理论贡献。</p>
+<details class="exam-solution"> <summary class="exam-solution-summary"> <span class="exam-solution-summary-main"> <span class="exam-solution-summary-icon" aria-hidden="true">›</span> <span>答案 / 解析</span> </span> <span class="exam-solution-summary-hint" aria-hidden="true"></span> </summary> <div class="exam-solution-content"> <ol>
+<li>“两个结合”是坚持和发展马克思主义作出的重大贡献。我们党始终高度重视把马克思主义基本原理同中国具体实际相结合。</li>
+<li>“两个结合”使马克思主义具有民族形式，将马克思主义基本原理同中华优秀传统文化相结合，是又一次思想解放。</li>
+<li>“两个结合”让中国特色社会主义道路有了更加宏阔深远的历史纵深，拓展了中国特色社会主义道路的文化根基，开辟了广阔的理论和实践创新空间，表明我们党对中国道路、理论、制度的认识达到了新高度，表明我们党的历史自信、文化自信达到了新高度，表明我们党在传承中华优秀传统文化中推进理论创新的自觉性达到了新高度。</li>
+<li>只有坚持“两个结合”，才能正确回答时代和实践提出的重大问题，才能始终保持马克思主义的蓬勃生机和旺盛活力，不断开辟马克思主义中国化时代化新境界。</li>
+</ol> </div> </details> 
+<h3 id="2">2.</h3>
+<p>简述党的领导制度主要涵盖哪几个方面的制度。</p>
+<details class="exam-solution"> <summary class="exam-solution-summary"> <span class="exam-solution-summary-main"> <span class="exam-solution-summary-icon" aria-hidden="true">›</span> <span>答案 / 解析</span> </span> <span class="exam-solution-summary-hint" aria-hidden="true"></span> </summary> <div class="exam-solution-content"> <ol>
+<li>建立不忘初心、牢记使命的制度。</li>
+<li>完善坚定维护党中央权威和中统一领导的各项制度。</li>
+<li>健全党的全面领导制度。</li>
+<li>健全为人民执政、靠人民执政各项制度。</li>
+<li>健全提高党的执政能力和领导水平制度。</li>
+<li>完善全面从严治党制度。</li>
+</ol> </div> </details> 
+<h3 id="3">3.</h3>
+<p>简述如何理解全过程人民民主是程序民主和实质民主的统一。</p>
+<details class="exam-solution"> <summary class="exam-solution-summary"> <span class="exam-solution-summary-main"> <span class="exam-solution-summary-icon" aria-hidden="true">›</span> <span>答案 / 解析</span> </span> <span class="exam-solution-summary-hint" aria-hidden="true"></span> </summary> <div class="exam-solution-content"> <ol>
+<li>全过程人民民主具有完整的制度程序，构建了多样、畅通、有序的民主渠道，国家法律法规、方针政策都依照程序、经过民主酝酿，通过科学决策、民主决策产生。</li>
+<li>全过程人民民主保障人民的投票权而且确保人民拥有广泛参与权.</li>
+<li>全过程人民民主重视对人民的政治承诺而且确保这些承诺得到实现。</li>
+<li>全过程人民民主完善权力运行规则和程序而且确保权力真正受到人民监督和制约。</li>
+<li>全过程人民民主使民主从价值理念变成扎根中国大地的制度形态、治理机制和人民的生活方式。</li>
+</ol> </div> </details> 
+<h3 id="4">4.</h3>
+<p>简述如何全面贯彻新时代党解决台湾问题的总体方略。</p>
+<details class="exam-solution"> <summary class="exam-solution-summary"> <span class="exam-solution-summary-main"> <span class="exam-solution-summary-icon" aria-hidden="true">›</span> <span>答案 / 解析</span> </span> <span class="exam-solution-summary-hint" aria-hidden="true"></span> </summary> <div class="exam-solution-content"> <ol>
+<li>必须坚持党中央对对台工作的集中统一领导，这是统一的根本保证。</li>
+<li>坚持在中华民族伟大复兴进程中推进祖国统一，这是统一的历史方位。</li>
+<li>坚持在祖国大陆发展进步基础上解决台湾问题，这是统一的战略思路。</li>
+<li>坚持“和平统一、一国两制”基本方针，这是统一的大政方针。</li>
+<li>坚持一个中国原则和“九二共识”,这是统一的政治基础。</li>
+<li>坚持推动两岸关系和平发展、融合发展，这是统一的实践途径。</li>
+<li>坚持团结台湾同胞、争取台湾民心，这是统一的根本动力。</li>
+<li>坚持粉碎“台独”分裂图谋，这是统一的必然要求。</li>
+<li>坚持反对外部势力干涉，这是统一的外部条件。</li>
+<li>坚持决不承诺放弃使用武力，这是统一的战略支撑。</li>
+</ol> </div> </details> 
+<h3 id="5">5.</h3>
+<p>简述新时代党的建设总要求是什么。</p>
+<details class="exam-solution"> <summary class="exam-solution-summary"> <span class="exam-solution-summary-main"> <span class="exam-solution-summary-icon" aria-hidden="true">›</span> <span>答案 / 解析</span> </span> <span class="exam-solution-summary-hint" aria-hidden="true"></span> </summary> <div class="exam-solution-content"> <ol>
+<li>坚持和加强党的全面领导，坚持党要管党、全面从严治党，以加强党的长期执政能力建设、先进性和纯洁性建设为主线。</li>
+<li>以党的政治建设为统领，以坚定理想信念宗旨为根基。</li>
+<li>以调动全党积极性、主动性、创造性为着力点。</li>
+<li>全面推进党的政治建设、思想建设、组织建设、作风建设、纪律建设，把制度建设贯穿其中。</li>
+<li>深入推进反腐败斗争，不断提高党的建设质量，把党建设成为始终走在时代前列、人民衷心拥护、勇于自我革命、经得起各种风浪考验、朝气蓬勃的马克思主义执政党。</li>
+</ol><p>注：在第十七章：坚持从严治党的第一节的第二部分的一个方框里面。</p> </div> </details> 
+<h2 id="四论述题20分1">四、论述题（20分×1）</h2>
+<p>材料一：</p>
+<blockquote>
+<p>习近平总书记指出：“时代越是向前，知识和人才的重要性就愈发突出，教育的地位和作用就愈发凸显。”同时强调：“谁牵住了科技创新这个‘牛鼻子’，谁走好了科技创新这步先手棋，谁就能占领先机、赢得优势。”这深刻揭示了在新时代背景下，教育、人才与科技创新对于国家发展全局的基础性、战略性和先导性意义。</p>
+</blockquote>
+<p>材料二：</p>
+<blockquote>
+<p>2025年是北京邮电大学建校70周年。作为新中国创办的第一所邮电高等学府，北京邮电大学自成立以来，始终秉承“传邮万里，国脉所系”的家国情怀，在我国信息通信事业从起步、追赶到引领的伟大历程中勇担使命、贡献卓著。站在新的历史起点上，学校坚持落实立德树人根本任务，主动对接国家重大战略需求，聚焦服务高水平科技自立自强，持续推动人才培养体系改革创新，奋力书写新时代服务中国式现代化的新篇章。</p>
+</blockquote>
+<h3 id="1-1">1.</h3>
+<p>在新时代科技竞争和百年未有之大变局背景下，试述应如何落实教育优先发展、科技自立自强、人才引领驱动三大战略？</p>
+<details class="exam-solution"> <summary class="exam-solution-summary"> <span class="exam-solution-summary-main"> <span class="exam-solution-summary-icon" aria-hidden="true">›</span> <span>答案 / 解析</span> </span> <span class="exam-solution-summary-hint" aria-hidden="true"></span> </summary> <div class="exam-solution-content"> <ol>
+<li>教育优先发展：要牢固树立抓教育就是抓发展、谋教育就是谋未来的理念，坚持教育在国家现代化全局中超前布局、优先部署，在组织领导、发展规划、资源保障上为教育提供有力支持，做到经济社会发展规划优先安排教育发展、财政资金投入优先保障教育投入、公共资源配置优先满足教育和人力资源开发需要，推动健全优先发展教育事业的体制机制，使我国教育越办越好、越办越强。</li>
+<li>科技自立自强：要坚持把国家和民族发展放在自己力量的基点上，坚持把科技自立自强作为国家发展的战略支撑，加快建立保障高水平科技自立自强的制度体系，集聚力量进行原创性引领性科技攻关，坚决攻克重要领域“卡脖子”技术，不断提升我国科技自主性、安全性。要以更加开放的思维和举措推进国际科技交流合作，在开放合作中提升自身科技创新能力。</li>
+<li>人才引领驱动：要坚持把人才资源开发放在最优先位置，促进人才区域合理布局和协调发展，激发各类人才创新活力，按照创新规律培养和吸引人才，按照市场规律让人才自由流动。发挥重大人才工程牵引作用，加快建设国家战略人才力量，形成人才国际竞争的比较优势，建设全球人才高地。</li>
+</ol> </div> </details> 
+<h3 id="2-1">2.</h3>
+<p>结合习近平总书记讲话和北京邮电大学建校70周年这一重要历史节点，谈谈新时代行业特色高校如何在传承优良办学传统的基础上，创新人才培养模式，更好服务国家重大战略需求和中国式现代化建设？</p>
+<details class="exam-solution"> <summary class="exam-solution-summary"> <span class="exam-solution-summary-main"> <span class="exam-solution-summary-icon" aria-hidden="true">›</span> <span>答案 / 解析</span> </span> <span class="exam-solution-summary-hint" aria-hidden="true"></span> </summary> <div class="exam-solution-content"> <p>本题无固定答案，结合北邮实际作答即可，重点章节：第八章 社会主义现代化建设的教育、科技、人才战略</p> </div> </details> <script type="module">const l=document.querySelectorAll(".exam-solution:not([data-exam-solution-ready])");l.forEach((e,a)=>{if(!(e instanceof HTMLDetailsElement))return;e.setAttribute("data-exam-solution-ready","true");const s=`solution:${a}`,n=window.__examState,r=()=>{n?.update?.(o=>{const t={...o.solutions};return e.open?t[s]=!0:delete t[s],{...o,solutions:t}}),n?.sync?.()};n?.read?.().solutions?.[s]===!0&&(e.open=!0),e.addEventListener("toggle",r),window.addEventListener(n?.events?.setAll??"examsetall",o=>{const t=o instanceof CustomEvent&&o.detail?.revealed===!0;e.open!==t&&(e.open=t)}),n?.sync?.()});</script>  <details id="related-exams" class="related-exams mt-8 overflow-hidden rounded-[8px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900" open data-astro-cid-a6434jl4> <summary class="flex cursor-pointer list-none items-center justify-between px-4 py-3 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50" data-astro-cid-a6434jl4> <p class="m-0 text-sm font-semibold tracking-wide text-slate-600 dark:text-slate-300" data-astro-cid-a6434jl4>
+《习近平新时代中国特色社会主义思想概论》的期末试卷
+</p> <svg class="related-exams-chevron h-4 w-4 flex-none text-slate-400 transition-transform duration-200 dark:text-slate-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-astro-cid-a6434jl4> <polyline points="6 9 12 15 18 9" data-astro-cid-a6434jl4></polyline> </svg> </summary> <ul class="divide-y divide-slate-200 text-sm dark:divide-slate-800" data-astro-cid-a6434jl4> <li class="flex min-h-14 items-center justify-between gap-3 px-4 py-2" data-astro-cid-a6434jl4> <div class="min-w-0" data-astro-cid-a6434jl4> <span class="block truncate leading-6 text-slate-700 dark:text-slate-300" aria-current="page" data-astro-cid-a6434jl4> 25-26-1-习近平新时代中国特色社会主义思想概论-期末 </span> </div> <div class="flex flex-none items-center gap-2" data-astro-cid-a6434jl4> <span class="inline-flex h-5 items-center rounded-md bg-sky-100 px-2 text-xs font-semibold leading-none text-sky-800 dark:bg-sky-900/60 dark:text-sky-200" data-astro-cid-a6434jl4>
+当前
+</span>  </div> </li><li class="flex min-h-14 items-center justify-between gap-3 px-4 py-2" data-astro-cid-a6434jl4> <div class="min-w-0" data-astro-cid-a6434jl4> <a href="/exam/24-25-2-习近平新时代中国特色社会主义思想概论-期末" class="block truncate leading-6 no-underline" data-astro-cid-a6434jl4> 24-25-2-习近平新时代中国特色社会主义思想概论-期末 </a> </div> <div class="flex flex-none items-center gap-2" data-astro-cid-a6434jl4>   </div> </li><li class="flex min-h-14 items-center justify-between gap-3 px-4 py-2" data-astro-cid-a6434jl4> <div class="min-w-0" data-astro-cid-a6434jl4> <a href="/exam/24-25-1-习近平新时代中国特色社会主义思想概论-期末" class="block truncate leading-6 no-underline" data-astro-cid-a6434jl4> 24-25-1-习近平新时代中国特色社会主义思想概论-期末 </a> </div> <div class="flex flex-none items-center gap-2" data-astro-cid-a6434jl4>   </div> </li> </ul> </details> <script type="module">(function(){var t="relatedExamsExpanded",e=document.getElementById("related-exams");if(e)try{var a=localStorage.getItem(t);a!==null&&(e.open=a==="true"),e.addEventListener("toggle",function(){localStorage.setItem(t,String(e.open))})}catch{}})();</script> </div> </div> <div class="floating-toolbar" id="examToolbar" data-expanded="false"> <div class="floating-toolbar-actions" id="examToolbarActions"> <button class="floating-toolbar-control cursor-pointer transition-opacity active:scale-95" id="backToTop" type="button" aria-label="回到顶部" data-tooltip="回到顶部" data-toolbar-action> <svg aria-hidden="true" class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"> <path d="M18 15l-6-6-6 6"></path> </svg> </button> <button class="floating-toolbar-control exam-toolbar-toc-toggle cursor-pointer active:scale-95" id="examTocMobileToggle" type="button" aria-label="显示目录" aria-expanded="false" data-tooltip="目录" data-toolbar-action> <svg aria-hidden="true" class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"> <path d="M9 6h10"></path> <path d="M9 12h10"></path> <path d="M9 18h10"></path> <circle cx="5" cy="6" r="1" fill="currentColor" stroke="none"></circle> <circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"></circle> <circle cx="5" cy="18" r="1" fill="currentColor" stroke="none"></circle> </svg> </button> <a class="no-underline floating-toolbar-control active:scale-95" href="https://github.com/byrdocs/byrdocs-neowiki/edit/master/exams/25-26-1-%E4%B9%A0%E8%BF%91%E5%B9%B3%E6%96%B0%E6%97%B6%E4%BB%A3%E4%B8%AD%E5%9B%BD%E7%89%B9%E8%89%B2%E7%A4%BE%E4%BC%9A%E4%B8%BB%E4%B9%89%E6%80%9D%E6%83%B3%E6%A6%82%E8%AE%BA-%E6%9C%9F%E6%9C%AB/index.mdx" aria-label="在 GitHub 上编辑" data-tooltip="在 GitHub 上编辑" data-toolbar-action> <svg aria-hidden="true" class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"> <path d="M12 20h9"></path> <path d="m16.5 3.5 4 4L8 20l-5 1 1-5 12.5-12.5Z"></path> </svg> </a> <button class="floating-toolbar-control cursor-pointer active:scale-95" id="examPrint" type="button" aria-label="打印试卷" data-tooltip="打印试卷" data-toolbar-action> <svg aria-hidden="true" class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"> <polyline points="6 9 6 2 18 2 18 9"></polyline> <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path> <rect x="6" y="14" width="12" height="8"></rect> </svg> </button> <button class="floating-toolbar-control cursor-pointer active:scale-95 disabled:cursor-default disabled:opacity-50" id="examAnswersToggle" type="button" aria-label="显示全部答案" aria-pressed="false" data-tooltip="显示全部答案" data-toolbar-action> <svg aria-hidden="true" class="h-5 w-5" data-exam-toggle-icon="show" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"> <path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6Z"></path> <circle cx="12" cy="12" r="3"></circle> </svg> <svg aria-hidden="true" class="h-5 w-5" data-exam-toggle-icon="hide" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"> <path d="M3 3l18 18"></path> <path d="M10.6 10.7a2 2 0 0 0 2.7 2.7"></path> <path d="M9.4 5.6A10.7 10.7 0 0 1 12 5.2c6.4 0 10 6 10 6a17.7 17.7 0 0 1-4.1 4.6"></path> <path d="M6.2 6.3C3.7 8 2 10.8 2 10.8s3.6 6 10 6c1.2 0 2.4-.2 3.4-.6"></path> </svg> </button> </div> <button class="floating-toolbar-control floating-toolbar-toggle cursor-pointer active:scale-95" id="examToolbarToggle" type="button" aria-label="展开工具栏" aria-expanded="false" aria-controls="examToolbarActions" data-tooltip="展开工具栏"> <svg aria-hidden="true" class="h-5 w-5" data-toolbar-toggle-icon="open" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"> <path d="M12 5v14"></path> <path d="M5 12h14"></path> </svg> <svg aria-hidden="true" class="h-5 w-5" data-toolbar-toggle-icon="close" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"> <path d="m18 6-12 12"></path> <path d="M6 6l12 12"></path> </svg> </button> </div>  <script>
+  var examToolbar = document.getElementById("examToolbar");
+  var examToolbarToggle = document.getElementById("examToolbarToggle");
+  var examAnswersToggle = document.getElementById("examAnswersToggle");
+  var backToTop = document.getElementById("backToTop");
+  var examPrint = document.getElementById("examPrint");
+  var setExamToolbarExpanded = function(expanded) {
+    if (!(examToolbar instanceof HTMLElement)) return;
+    examToolbar.dataset.expanded = expanded ? "true" : "false";
+    if (examToolbarToggle instanceof HTMLButtonElement) {
+      examToolbarToggle.setAttribute("aria-expanded", String(expanded));
+      examToolbarToggle.setAttribute(
+        "aria-label",
+        expanded ? "收起工具栏" : "展开工具栏",
+      );
+      examToolbarToggle.dataset.tooltip = expanded ? "收起工具栏" : "展开工具栏";
+    }
+  };
+  var toggleExamToolbarExpanded = function() {
+    setExamToolbarExpanded(examToolbar?.dataset.expanded !== "true");
+  };
+
+  setExamToolbarExpanded(false);
+  examToolbarToggle?.addEventListener("click", function(event) {
+    event.stopPropagation();
+    toggleExamToolbarExpanded();
+  });
+  examToolbar?.querySelectorAll("[data-toolbar-action]").forEach(function(control) {
+    control.addEventListener("click", function() {
+      setExamToolbarExpanded(false);
+    });
+  });
+  document.addEventListener("click", function(event) {
+    if (!(examToolbar instanceof HTMLElement) || examToolbar.dataset.expanded !== "true")
+      return;
+    if (examToolbar.contains(event.target))
+      return;
+    setExamToolbarExpanded(false);
+  });
+  document.addEventListener("keydown", function(event) {
+    if (event.key === "Escape")
+      setExamToolbarExpanded(false);
+  });
+
+  // Back to top
+  var updateBackToTopVisibility = function() {
+    if (!backToTop) return;
+    backToTop.classList.toggle("is-visible", window.scrollY > 200);
+  };
+  updateBackToTopVisibility();
+  window.addEventListener("scroll", updateBackToTopVisibility, { passive: true });
+  backToTop?.addEventListener("click", function() {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+
+  // Print preparation (works for both Ctrl+P and print button)
+  var printUrlFooter = null;
+  var prePrintState = null;
+  window.addEventListener("beforeprint", function() {
+    // Save current state to restore after print
+    prePrintState = {
+      blanks: [],
+      solutions: [],
+      choices: []
+    };
+    // Reveal all answers
+    if (!window.__examState?.getAllShown?.()) {
+      window.__examState?.toggleAll?.();
+      prePrintState.wasHidden = true;
+    }
+    // Open all <details> solutions
+    document.querySelectorAll(".exam-solution:not([open])").forEach(function(el) {
+      el.setAttribute("open", "");
+      prePrintState.solutions.push(el);
+    });
+    // Show all blanks
+    document.querySelectorAll(".exam-blank[aria-pressed='false']").forEach(function(el) {
+      el.setAttribute("aria-pressed", "true");
+      prePrintState.blanks.push(el);
+    });
+    // Reveal all choice answers
+    document.querySelectorAll(".exam-choices[data-has-answer='true'][data-revealed='false']").forEach(function(group) {
+      group.querySelectorAll(".exam-choice-option").forEach(function(opt) {
+        if (opt.getAttribute("data-answer") === "true") {
+          opt.classList.add("is-correct");
+          var input = opt.querySelector(".exam-choice-input");
+          if (input) input.checked = true;
+        }
+      });
+      group.setAttribute("data-revealed", "true");
+      prePrintState.choices.push(group);
+    });
+    // Add print footer
+    printUrlFooter = document.createElement("div");
+    printUrlFooter.className = "print-footer";
+    printUrlFooter.style.display = "none";
+    printUrlFooter.innerHTML =
+      '本页面打印自 <a href="' + window.location.href + '">' + window.location.href + '</a><br>' +
+      '来源：<a href="https://wiki.byrdocs.org">BYR Docs 维基真题</a><br>' +
+      '除非另有声明，本文件内容采用 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> 授权。';
+    document.querySelector(".wiki-content")?.appendChild(printUrlFooter);
+  });
+  window.addEventListener("afterprint", function() {
+    // Remove URL footer
+    if (printUrlFooter) { printUrlFooter.remove(); printUrlFooter = null; }
+    // Restore previous state
+    if (!prePrintState) return;
+    if (prePrintState.wasHidden) {
+      window.__examState?.toggleAll?.();
+    }
+    prePrintState.solutions.forEach(function(el) { el.removeAttribute("open"); });
+    prePrintState.blanks.forEach(function(el) { el.setAttribute("aria-pressed", "false"); });
+    prePrintState.choices.forEach(function(group) {
+      group.querySelectorAll(".exam-choice-option").forEach(function(opt) {
+        opt.classList.remove("is-correct");
+        var input = opt.querySelector(".exam-choice-input");
+        if (input) input.checked = false;
+      });
+      group.setAttribute("data-revealed", "false");
+    });
+    prePrintState = null;
+  });
+
+  // Print button just triggers window.print()
+  examPrint?.addEventListener("click", function() { window.print(); });
+
+  // Answers toggle
+  var updateExamAnswersToggle = function() {
+    if (!(examAnswersToggle instanceof HTMLButtonElement)) return;
+    var hasRevealable = window.__examState?.hasRevealable?.() ?? false;
+    var allShown = hasRevealable && (window.__examState?.getAllShown?.() ?? false);
+    var label = allShown ? "隐藏全部答案" : "显示全部答案";
+    var tooltip = hasRevealable ? label : "暂无可显示答案";
+    examAnswersToggle.disabled = !hasRevealable;
+    examAnswersToggle.dataset.state = allShown ? "shown" : "hidden";
+    examAnswersToggle.dataset.tooltip = tooltip;
+    examAnswersToggle.setAttribute("aria-label", label);
+    examAnswersToggle.setAttribute("aria-pressed", "" + allShown);
+  };
+  updateExamAnswersToggle();
+  window.addEventListener(
+    window.__examState?.events?.change ?? "examstatechange",
+    updateExamAnswersToggle,
+  );
+  examAnswersToggle?.addEventListener("click", function() {
+    window.__examState?.toggleAll?.();
+  });
+  requestAnimationFrame(function() { window.__examState?.sync?.(); });
+</script>  </article> </main>  <footer class="mt-10 border-t border-slate-200/80 bg-white/70 dark:border-slate-800 dark:bg-slate-950/70"> <div class="mx-auto flex w-full max-w-6xl flex-col items-center gap-3 px-4 py-5 sm:px-6 lg:px-8"> <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-sm text-slate-500 dark:text-slate-400"> <a class="no-underline text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200" href="https://github.com/byrdocs">GitHub</a> <span class="text-slate-300 dark:text-slate-700">·</span> <a class="no-underline text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200" href="https://byrdocs.org">BYR Docs</a> <span class="text-slate-300 dark:text-slate-700">·</span> <a class="no-underline text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200" href="https://qm.qq.com/cgi-bin/qm/qr?k=plu_KgkqxI4Dw-FwW1aFQDQ0hL062WNV&jump_from=webapi&authKey=09aiBE16MH9jTfmgmGtCjMRsvpazAMkvLcG35mdICYHe2+FKF51qqSIdUC0dVxkh">QQ 群</a> </div> <p class="m-0 text-center text-xs text-slate-400 dark:text-slate-500">
+除非另有声明，本网站内容采用 <a class="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300" href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> 授权。
+</p> </div> </footer> </div> <script>
+          var initExamTocDesktopToggle = function() {
+            var button = document.getElementById("examTocDesktopToggle");
+            if (!(button instanceof HTMLButtonElement))
+              return;
+
+            var storageKey = "exam-toc-desktop-collapsed";
+            var getCollapsed = function() {
+              return document.documentElement.dataset.examTocDesktop === "collapsed";
+            };
+            var syncButton = function() {
+              var collapsed = getCollapsed();
+              button.dataset.state = collapsed ? "collapsed" : "expanded";
+              button.setAttribute("aria-expanded", String(!collapsed));
+              button.setAttribute(
+                "aria-label",
+                collapsed ? "展开目录侧边栏" : "折叠目录侧边栏",
+              );
+            };
+            var setCollapsed = function(collapsed) {
+              document.documentElement.dataset.examTocDesktop = collapsed
+                ? "collapsed"
+                : "expanded";
+              try {
+                window.localStorage.setItem(
+                  storageKey,
+                  collapsed ? "true" : "false",
+                );
+              } catch {}
+              syncButton();
+              window.dispatchEvent(
+                new CustomEvent("examtocdesktopchange", {
+                  detail: { collapsed: collapsed },
+                }),
+              );
+            };
+
+            syncButton();
+            button.addEventListener("click", function() {
+              setCollapsed(!getCollapsed());
+            });
+            window.addEventListener("examtocdesktopchange", syncButton);
+            window.__examTocDesktop = {
+              getCollapsed: getCollapsed,
+              setCollapsed: setCollapsed,
+            };
+          };
+
+          if (document.readyState === "loading")
+            document.addEventListener("DOMContentLoaded", initExamTocDesktopToggle, {
+              once: true,
+            });
+          else
+            initExamTocDesktopToggle();
+        </script> <script>
+      var initHeaderPageTitle = function() {
+        var header = document.querySelector("[data-header-nav]");
+        if (!(header instanceof HTMLElement))
+          return;
+
+        var pageHeading = document.querySelector("[data-page-heading]");
+        if (
+          header.dataset.pageTitleEnabled !== "true" ||
+          !(pageHeading instanceof HTMLElement)
+        ) {
+          header.dataset.titleState = "site";
+          return;
+        }
+
+        var frame = null;
+        var syncHeaderTitleState = function() {
+          frame = null;
+          var headerHeight = header.getBoundingClientRect().height;
+          header.dataset.titleState =
+            pageHeading.getBoundingClientRect().top <= headerHeight
+              ? "page"
+              : "site";
+        };
+        var requestHeaderTitleStateSync = function() {
+          if (frame !== null)
+            return;
+          frame = window.requestAnimationFrame(syncHeaderTitleState);
+        };
+
+        syncHeaderTitleState();
+        window.addEventListener("scroll", requestHeaderTitleStateSync, {
+          passive: true,
+        });
+        window.addEventListener("resize", requestHeaderTitleStateSync);
+      };
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initHeaderPageTitle, {
+          once: true,
+        });
+      } else {
+        initHeaderPageTitle();
+      }
+    </script>  </body></html>

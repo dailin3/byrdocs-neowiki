@@ -1,0 +1,1087 @@
+<!DOCTYPE html><html lang="zh"> <head><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="apple-touch-icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.44/dist/katex.min.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="generator" content="Astro v6.1.5"><meta name="description" content="BYR Docs 维基真题收录北京邮电大学近年试题，是一个开放、共建、共享的维基网站。"><meta name="keywords" content="北邮,北京邮电大学,考试题目,维基"><meta name="author" content="BYR Docs"><script>
+      const themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
+      const applyTheme = () => {
+        const resolvedTheme = themeMedia.matches ? "dark" : "light";
+        const isDark = resolvedTheme === "dark";
+        document.documentElement.classList.toggle("dark", isDark);
+        document.documentElement.style.colorScheme = resolvedTheme;
+      };
+      applyTheme();
+      themeMedia.addEventListener("change", applyTheme);
+    </script><script>
+          (() => {
+            const storageKey = "exam-toc-desktop-collapsed";
+            let collapsed = false;
+
+            try {
+              collapsed = window.localStorage.getItem(storageKey) === "true";
+            } catch {}
+
+            document.documentElement.dataset.examTocDesktop = collapsed
+              ? "collapsed"
+              : "expanded";
+          })();
+        </script><script>
+      const examStateStorageKeyPrefix = "exam-state:";
+      const examStateTtlMs = 12 * 60 * 60 * 1000;
+      const examStateChangeEvent = "examstatechange";
+      const examStateSetAllEvent = "examsetall";
+      const createEmptyExamState = () => ({
+        blanks: {},
+        solutions: {},
+        choices: {},
+      });
+      const isRecord = (value) =>
+        value !== null && typeof value === "object" && !Array.isArray(value);
+      const normalizeChoiceState = (value) => ({
+        selected: Array.isArray(value?.selected)
+          ? value.selected.filter((item) => typeof item === "string")
+          : [],
+        revealed: value?.revealed === true,
+        mode:
+          value?.mode === "answers" || value?.mode === "checked"
+            ? value.mode
+            : undefined,
+      });
+      const normalizeExamState = (value) => {
+        const state = createEmptyExamState();
+        if (!isRecord(value)) return state;
+        if (isRecord(value.blanks))
+          state.blanks = Object.fromEntries(
+            Object.entries(value.blanks).filter(
+              ([, revealed]) => revealed === true,
+            ),
+          );
+        if (isRecord(value.solutions))
+          state.solutions = Object.fromEntries(
+            Object.entries(value.solutions).filter(([, open]) => open === true),
+          );
+        if (isRecord(value.choices))
+          state.choices = Object.fromEntries(
+            Object.entries(value.choices)
+              .map(([key, choiceState]) => [
+                key,
+                normalizeChoiceState(choiceState),
+              ])
+              .filter(
+                ([, choiceState]) =>
+                  choiceState.revealed === true ||
+                  choiceState.selected.length > 0,
+              ),
+          );
+        return state;
+      };
+      const isExamStateEmpty = (state) =>
+        Object.keys(state.blanks).length === 0 &&
+        Object.keys(state.solutions).length === 0 &&
+        Object.keys(state.choices).length === 0;
+      const getExamStateStorageKey = () =>
+        `${examStateStorageKeyPrefix}${window.location.pathname}`;
+      const removeExamState = () => {
+        try {
+          window.localStorage.removeItem(getExamStateStorageKey());
+        } catch {
+          return;
+        }
+      };
+      const readExamState = () => {
+        try {
+          const raw = window.localStorage.getItem(getExamStateStorageKey());
+          if (!raw) return createEmptyExamState();
+          const parsed = JSON.parse(raw);
+          if (
+            !isRecord(parsed) ||
+            typeof parsed.expiresAt !== "number" ||
+            parsed.expiresAt < Date.now()
+          ) {
+            removeExamState();
+            return createEmptyExamState();
+          }
+          return normalizeExamState(parsed);
+        } catch {
+          removeExamState();
+          return createEmptyExamState();
+        }
+      };
+      const writeExamState = (state) => {
+        const normalizedState = normalizeExamState(state);
+        if (isExamStateEmpty(normalizedState)) {
+          removeExamState();
+          return normalizedState;
+        }
+        try {
+          window.localStorage.setItem(
+            getExamStateStorageKey(),
+            JSON.stringify({
+              expiresAt: Date.now() + examStateTtlMs,
+              ...normalizedState,
+            }),
+          );
+        } catch {
+          return normalizedState;
+        }
+        return normalizedState;
+      };
+      const updateExamState = (updater) =>
+        writeExamState(updater(readExamState()) ?? createEmptyExamState());
+      const getRevealableExamChoiceGroups = () => [
+        ...document.querySelectorAll(".exam-choices[data-has-answer='true']"),
+      ];
+      const hasRevealable = () =>
+        document.querySelector(
+          ".exam-blank[aria-pressed], .exam-solution, .exam-choices[data-has-answer='true']",
+        ) !== null;
+      const getAllShown = () => {
+        if (!hasRevealable()) return false;
+        const blanks = [
+          ...document.querySelectorAll(".exam-blank[aria-pressed]"),
+        ];
+        const solutions = [...document.querySelectorAll(".exam-solution")];
+        const choiceGroups = getRevealableExamChoiceGroups();
+        return (
+          blanks.every(
+            (blank) => blank.getAttribute("aria-pressed") === "true",
+          ) &&
+          solutions.every(
+            (solution) =>
+              solution instanceof HTMLDetailsElement && solution.open,
+          ) &&
+          choiceGroups.every(
+            (group) => group.getAttribute("data-revealed") === "true",
+          )
+        );
+      };
+      const syncExamState = () =>
+        window.dispatchEvent(
+          new CustomEvent(examStateChangeEvent, {
+            detail: {
+              allShown: getAllShown(),
+              hasRevealable: hasRevealable(),
+            },
+          }),
+        );
+      const setAllRevealed = (revealed) =>
+        window.dispatchEvent(
+          new CustomEvent(examStateSetAllEvent, {
+            detail: { revealed },
+          }),
+        );
+      window.__examState = {
+        read: readExamState,
+        update: updateExamState,
+        sync: syncExamState,
+        toggleAll: () => setAllRevealed(!getAllShown()),
+        getAllShown,
+        hasRevealable,
+        events: {
+          change: examStateChangeEvent,
+          setAll: examStateSetAllEvent,
+        },
+      };
+    </script><title>24-25-1-英语听说2-期末 - BYR Docs 维基真题</title><style>.related-exams[data-astro-cid-a6434jl4]>summary[data-astro-cid-a6434jl4]::-webkit-details-marker{display:none}.related-exams[data-astro-cid-a6434jl4]>summary[data-astro-cid-a6434jl4]::marker{content:""}.related-exams[data-astro-cid-a6434jl4][open]>summary[data-astro-cid-a6434jl4]{border-bottom:1px solid rgb(226 232 240)}.related-exams[data-astro-cid-a6434jl4][open] .related-exams-chevron[data-astro-cid-a6434jl4]{transform:rotate(180deg)}.dark .related-exams[data-astro-cid-a6434jl4][open]>summary[data-astro-cid-a6434jl4]{border-bottom-color:#1e293b}#examAnswersToggle [data-exam-toggle-icon]{display:none}#examAnswersToggle[data-state=hidden] [data-exam-toggle-icon=show],#examAnswersToggle[data-state=shown] [data-exam-toggle-icon=hide]{display:block}#backToTop{opacity:0;pointer-events:none;transition:opacity .2s ease}#backToTop.is-visible{opacity:1;pointer-events:auto}@media print{@page{margin:2cm 1.5cm}#examToolbar{display:none!important}nav,footer{display:none!important}.exam-blank{background:transparent!important;min-width:0!important}.exam-blank-placeholder{display:none!important}.exam-blank-answer{visibility:visible!important}.exam-blank[aria-pressed=true].exam-blank,.exam-blank[aria-pressed=false].exam-blank{background:transparent!important;box-shadow:0 1px #999!important;border-radius:0!important}.exam-solution{break-inside:avoid;border-radius:12px!important;border:1.5px solid #ccc!important}.exam-solution[open],.exam-solution:not([open]){overflow:visible!important}.exam-solution-summary{display:none!important}.exam-solution-content{display:block!important;padding:1em 1.2em!important}.exam-choices .exam-choice-option[data-answer=true]{outline:1px solid #000!important;outline-offset:-2px;border-radius:8px!important}.exam-choices .exam-choice-option.is-correct .exam-choice-indicator,.exam-choices .exam-choice-option[data-answer=true] .exam-choice-indicator{border-color:#000!important;border-width:2px!important}.exam-choices .exam-choice-option.is-correct .exam-choice-indicator:after,.exam-choices .exam-choice-option[data-answer=true] .exam-choice-indicator:after{background:#000!important;content:""!important;inset:1.5px!important;position:absolute!important}.exam-choices.single .exam-choice-option[data-answer=true] .exam-choice-indicator:after{border-radius:50%!important}.exam-choices-submit{display:none!important}.exam-choice-option{border-color:transparent!important;box-shadow:none!important;padding:.2em .5em!important}.print-footer{display:block!important;margin-top:2em;padding-top:1em;border-top:1px solid #ccc;font-size:.85em;color:#666;line-height:1.8}.print-footer a{color:#444}}
+</style>
+<link rel="stylesheet" href="/byrdocs-neowiki/_astro/exam.Dqi_d8wD.css">
+<link rel="stylesheet" href="/byrdocs-neowiki/_astro/Layout.B7MUkrao.css"></head> <body> <script>
+      document.addEventListener(
+        "click",
+        (e) => {
+          const a = e.target.closest("a[href]");
+          if (!a) return;
+          const href = a.getAttribute("href");
+          if (href && /^https?:\/\//.test(href)) {
+            a.setAttribute("target", "_blank");
+            a.setAttribute("rel", "noopener noreferrer");
+          }
+        },
+        true,
+      );
+    </script> <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        document.querySelectorAll(".astro-code").forEach((pre) => {
+          const wrapper = document.createElement("div");
+          wrapper.className = "code-block-wrapper";
+          pre.parentNode.insertBefore(wrapper, pre);
+          wrapper.appendChild(pre);
+
+          const toolbar = document.createElement("div");
+          toolbar.className = "code-toolbar";
+
+          const wrapBtn = document.createElement("button");
+          wrapBtn.type = "button";
+          wrapBtn.title = "切换自动换行";
+          wrapBtn.innerHTML =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M3 12h15a3 3 0 1 1 0 6h-4"/><polyline points="13 16 11 18 13 20"/><path d="M3 18h4"/></svg>';
+          wrapBtn.addEventListener("click", () => {
+            const isWrapped = pre.style.whiteSpace === "pre-wrap";
+            pre.style.whiteSpace = isWrapped ? "" : "pre-wrap";
+            pre.style.wordBreak = isWrapped ? "" : "break-all";
+            wrapBtn.style.color = isWrapped ? "" : "#4ade80";
+          });
+
+          const copyBtn = document.createElement("button");
+          copyBtn.type = "button";
+          copyBtn.title = "复制代码";
+          const copyIcon =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+          const checkIcon =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+          copyBtn.innerHTML = copyIcon;
+          copyBtn.addEventListener("click", () => {
+            const code = pre.querySelector("code");
+            const text = code ? code.textContent : pre.textContent;
+            navigator.clipboard.writeText(text || "").then(() => {
+              copyBtn.innerHTML = checkIcon;
+              copyBtn.classList.add("is-copied");
+              toolbar.classList.add("is-active");
+              setTimeout(() => {
+                copyBtn.innerHTML = copyIcon;
+                copyBtn.classList.remove("is-copied");
+                toolbar.classList.remove("is-active");
+              }, 2000);
+            });
+          });
+
+          toolbar.appendChild(wrapBtn);
+          toolbar.appendChild(copyBtn);
+          wrapper.appendChild(toolbar);
+        });
+      });
+    </script> <div class="layout-shell flex min-h-screen flex-col" data-has-exam-toc="true"> <nav class="relative border-b border-slate-200/80 bg-white/85 backdrop-blur dark:border-slate-800 dark:bg-slate-950/80 sticky top-0 z-40" data-header-nav data-page-title-enabled="true" data-title-state="site" data-astro-cid-3ef6ksr2> <div class="layout-container mx-auto flex w-full items-center gap-4 px-4 py-4 sm:px-6 lg:px-8" data-astro-cid-3ef6ksr2> <a class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm no-underline transition hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700" href="/" title="回到首页" data-astro-cid-3ef6ksr2> <img alt="BYR Docs" class="h-7 w-7" src="/favicon.svg" data-astro-cid-3ef6ksr2> </a> <div class="relative min-w-0 flex-1" data-astro-cid-3ef6ksr2> <a class="block truncate text-lg font-semibold tracking-tight text-slate-950 no-underline transition-[opacity,transform] duration-200 hover:text-slate-950 sm:text-2xl dark:text-white dark:hover:text-white" data-header-site-title href="/" data-astro-cid-3ef6ksr2>BYR Docs 维基真题</a> <span aria-hidden="true" class="pointer-events-none absolute inset-0 block truncate text-lg font-semibold tracking-tight text-slate-950 opacity-0 transition-[opacity,transform] duration-200 sm:text-2xl dark:text-white" data-header-page-title data-astro-cid-3ef6ksr2> 24-25-1-英语听说2-期末 </span> </div> <a class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm no-underline transition hover:border-slate-300 hover:text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-slate-700 dark:hover:text-slate-200" href="https://github.com/byrdocs/byrdocs-wiki-internal" aria-label="在 GitHub 上查看 BYR Docs 维基真题仓库" title="GitHub" target="_blank" rel="noopener noreferrer" data-astro-cid-3ef6ksr2> <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" data-astro-cid-3ef6ksr2><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" data-astro-cid-3ef6ksr2></path></svg> </a> </div> </nav> <main class="layout-container mx-auto flex w-full flex-1 px-4 py-6 sm:px-6 lg:px-8 xl:px-16"> <article class="wiki-content min-w-0 flex-1"> <h1 data-page-heading>24-25-1-英语听说2-期末</h1>  <div class="exam-page-layout"> <aside class="exam-toc-shell" id="examTocShell" data-collapsed="false"><div class="exam-toc-panel"><nav class="exam-toc-nav" id="examTocNav" aria-label="试题目录"> <ol class="exam-toc-list"> <li class="exam-toc-item" data-slug="part-i-listening-comprehension-50-points-2-points--per" data-path="part-i-listening-comprehension-50-points-2-points--per" data-depth="2" data-expanded="true"> <div class="exam-toc-row">  <a class="exam-toc-link exam-toc-link-level-1" href="#part-i-listening-comprehension-50-points-2-points--per" data-slug="part-i-listening-comprehension-50-points-2-points--per" data-path="part-i-listening-comprehension-50-points-2-points--per" data-depth="2"> <span class="exam-toc-link-label">Part I Listening Comprehension (50 points, 2 points / per)</span> </a> </div> <div class="exam-toc-children"> <div class="exam-toc-children-inner"> <ol class="exam-toc-sublist"> <li class="exam-toc-item" data-slug="section-a" data-path="part-i-listening-comprehension-50-points-2-points--per||section-a" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#section-a" data-slug="section-a" data-path="part-i-listening-comprehension-50-points-2-points--per||section-a" data-depth="3"> <span class="exam-toc-link-label"> Section A </span> </a> </div> </li><li class="exam-toc-item" data-slug="section-b" data-path="part-i-listening-comprehension-50-points-2-points--per||section-b" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#section-b" data-slug="section-b" data-path="part-i-listening-comprehension-50-points-2-points--per||section-b" data-depth="3"> <span class="exam-toc-link-label"> Section B </span> </a> </div> </li><li class="exam-toc-item" data-slug="section-c" data-path="part-i-listening-comprehension-50-points-2-points--per||section-c" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#section-c" data-slug="section-c" data-path="part-i-listening-comprehension-50-points-2-points--per||section-c" data-depth="3"> <span class="exam-toc-link-label"> Section C </span> </a> </div> </li><li class="exam-toc-item" data-slug="section-d" data-path="part-i-listening-comprehension-50-points-2-points--per||section-d" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#section-d" data-slug="section-d" data-path="part-i-listening-comprehension-50-points-2-points--per||section-d" data-depth="3"> <span class="exam-toc-link-label"> Section D </span> </a> </div> </li> </ol> </div> </div> </li><li class="exam-toc-item" data-slug="part-ii-reading-comprehension-20-points-2-points--per" data-path="part-ii-reading-comprehension-20-points-2-points--per" data-depth="2" data-expanded="true"> <div class="exam-toc-row">  <a class="exam-toc-link exam-toc-link-level-1" href="#part-ii-reading-comprehension-20-points-2-points--per" data-slug="part-ii-reading-comprehension-20-points-2-points--per" data-path="part-ii-reading-comprehension-20-points-2-points--per" data-depth="2"> <span class="exam-toc-link-label">Part II Reading Comprehension (20 points, 2 points / per)</span> </a> </div> <div class="exam-toc-children"> <div class="exam-toc-children-inner"> <ol class="exam-toc-sublist"> <li class="exam-toc-item" data-slug="passage-one-1" data-path="part-ii-reading-comprehension-20-points-2-points--per||passage-one-1" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#passage-one-1" data-slug="passage-one-1" data-path="part-ii-reading-comprehension-20-points-2-points--per||passage-one-1" data-depth="3"> <span class="exam-toc-link-label"> Passage One </span> </a> </div> </li><li class="exam-toc-item" data-slug="passage-two-1" data-path="part-ii-reading-comprehension-20-points-2-points--per||passage-two-1" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#passage-two-1" data-slug="passage-two-1" data-path="part-ii-reading-comprehension-20-points-2-points--per||passage-two-1" data-depth="3"> <span class="exam-toc-link-label"> Passage Two </span> </a> </div> </li> </ol> </div> </div> </li><li class="exam-toc-item" data-slug="part-iii-vocabulary-30-points-2-points--per" data-path="part-iii-vocabulary-30-points-2-points--per" data-depth="2"> <div class="exam-toc-row">  <a class="exam-toc-link exam-toc-link-level-1" href="#part-iii-vocabulary-30-points-2-points--per" data-slug="part-iii-vocabulary-30-points-2-points--per" data-path="part-iii-vocabulary-30-points-2-points--per" data-depth="2"> <span class="exam-toc-link-label">Part III Vocabulary (30 points, 2 points / per)</span> </a> </div>  </li> </ol> </nav></div><button class="exam-toc-desktop-trigger inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-r-xl border border-slate-200 border-l-0 bg-white text-slate-500 shadow-sm transition hover:border-slate-300 hover:text-slate-700 dark:border-slate-800 dark:border-l-0 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-slate-700 dark:hover:text-slate-200" id="examTocDesktopToggle" type="button" aria-label="展开目录侧边栏" aria-expanded="true"><svg aria-hidden="true" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h16"></path></svg></button></aside><div class="exam-toc-mobile" id="examTocMobile" data-open="false"><button class="exam-toc-mobile-backdrop" id="examTocMobileBackdrop" type="button" aria-label="关闭目录"></button><div class="exam-toc-mobile-panel" id="examTocMobilePanel"><div class="exam-toc-mobile-header"><p class="exam-toc-mobile-title">目录</p></div><nav class="exam-toc-nav exam-toc-nav-mobile" id="examTocMobileNav" aria-label="试题目录"> <ol class="exam-toc-list"> <li class="exam-toc-item" data-slug="part-i-listening-comprehension-50-points-2-points--per" data-path="part-i-listening-comprehension-50-points-2-points--per" data-depth="2" data-expanded="false"> <div class="exam-toc-row"> <button class="exam-toc-branch-toggle" type="button" aria-label="展开或折叠Part I Listening Comprehension (50 points, 2 points / per)" aria-expanded="false" data-branch-toggle="part-i-listening-comprehension-50-points-2-points--per"> <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"> <path d="m9 18 6-6-6-6"></path> </svg> </button> <a class="exam-toc-link exam-toc-link-level-1" href="#part-i-listening-comprehension-50-points-2-points--per" data-slug="part-i-listening-comprehension-50-points-2-points--per" data-path="part-i-listening-comprehension-50-points-2-points--per" data-depth="2"> <span class="exam-toc-link-label">Part I Listening Comprehension (50 points, 2 points / per)</span> </a> </div> <div class="exam-toc-children"> <div class="exam-toc-children-inner"> <ol class="exam-toc-sublist"> <li class="exam-toc-item" data-slug="section-a" data-path="part-i-listening-comprehension-50-points-2-points--per||section-a" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#section-a" data-slug="section-a" data-path="part-i-listening-comprehension-50-points-2-points--per||section-a" data-depth="3"> <span class="exam-toc-link-label"> Section A </span> </a> </div> </li><li class="exam-toc-item" data-slug="section-b" data-path="part-i-listening-comprehension-50-points-2-points--per||section-b" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#section-b" data-slug="section-b" data-path="part-i-listening-comprehension-50-points-2-points--per||section-b" data-depth="3"> <span class="exam-toc-link-label"> Section B </span> </a> </div> </li><li class="exam-toc-item" data-slug="section-c" data-path="part-i-listening-comprehension-50-points-2-points--per||section-c" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#section-c" data-slug="section-c" data-path="part-i-listening-comprehension-50-points-2-points--per||section-c" data-depth="3"> <span class="exam-toc-link-label"> Section C </span> </a> </div> </li><li class="exam-toc-item" data-slug="section-d" data-path="part-i-listening-comprehension-50-points-2-points--per||section-d" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#section-d" data-slug="section-d" data-path="part-i-listening-comprehension-50-points-2-points--per||section-d" data-depth="3"> <span class="exam-toc-link-label"> Section D </span> </a> </div> </li> </ol> </div> </div> </li><li class="exam-toc-item" data-slug="part-ii-reading-comprehension-20-points-2-points--per" data-path="part-ii-reading-comprehension-20-points-2-points--per" data-depth="2" data-expanded="false"> <div class="exam-toc-row"> <button class="exam-toc-branch-toggle" type="button" aria-label="展开或折叠Part II Reading Comprehension (20 points, 2 points / per)" aria-expanded="false" data-branch-toggle="part-ii-reading-comprehension-20-points-2-points--per"> <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"> <path d="m9 18 6-6-6-6"></path> </svg> </button> <a class="exam-toc-link exam-toc-link-level-1" href="#part-ii-reading-comprehension-20-points-2-points--per" data-slug="part-ii-reading-comprehension-20-points-2-points--per" data-path="part-ii-reading-comprehension-20-points-2-points--per" data-depth="2"> <span class="exam-toc-link-label">Part II Reading Comprehension (20 points, 2 points / per)</span> </a> </div> <div class="exam-toc-children"> <div class="exam-toc-children-inner"> <ol class="exam-toc-sublist"> <li class="exam-toc-item" data-slug="passage-one-1" data-path="part-ii-reading-comprehension-20-points-2-points--per||passage-one-1" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#passage-one-1" data-slug="passage-one-1" data-path="part-ii-reading-comprehension-20-points-2-points--per||passage-one-1" data-depth="3"> <span class="exam-toc-link-label"> Passage One </span> </a> </div> </li><li class="exam-toc-item" data-slug="passage-two-1" data-path="part-ii-reading-comprehension-20-points-2-points--per||passage-two-1" data-depth="3"> <div class="exam-toc-row"> <a class="exam-toc-link exam-toc-link-level-2" href="#passage-two-1" data-slug="passage-two-1" data-path="part-ii-reading-comprehension-20-points-2-points--per||passage-two-1" data-depth="3"> <span class="exam-toc-link-label"> Passage Two </span> </a> </div> </li> </ol> </div> </div> </li><li class="exam-toc-item" data-slug="part-iii-vocabulary-30-points-2-points--per" data-path="part-iii-vocabulary-30-points-2-points--per" data-depth="2"> <div class="exam-toc-row"> <span class="exam-toc-branch-spacer" aria-hidden="true"></span> <a class="exam-toc-link exam-toc-link-level-1" href="#part-iii-vocabulary-30-points-2-points--per" data-slug="part-iii-vocabulary-30-points-2-points--per" data-path="part-iii-vocabulary-30-points-2-points--per" data-depth="2"> <span class="exam-toc-link-label">Part III Vocabulary (30 points, 2 points / per)</span> </a> </div>  </li> </ol> </nav></div></div><script>
+  var initExamToc = function() {
+    var tocShell = document.getElementById("examTocShell");
+    var tocNav = document.getElementById("examTocNav");
+    var mobileRoot = document.getElementById("examTocMobile");
+    var mobilePanel = document.getElementById("examTocMobilePanel");
+    var mobileBackdrop = document.getElementById("examTocMobileBackdrop");
+    var mobileToggle = document.getElementById("examTocMobileToggle");
+
+    if (
+      !(tocShell instanceof HTMLElement) &&
+      !(mobileRoot instanceof HTMLElement)
+    ) {
+      return;
+    }
+
+    var tocLinks = Array.from(
+      document.querySelectorAll(".exam-toc-link[data-slug]"),
+    ).filter(function(link) {
+      return link instanceof HTMLAnchorElement;
+    });
+    var desktopItems = Array.from(
+      tocShell?.querySelectorAll(".exam-toc-item[data-slug]") || [],
+    ).filter(function(item) {
+      return item instanceof HTMLElement;
+    });
+    var mobileItems = Array.from(
+      mobileRoot?.querySelectorAll(".exam-toc-item[data-slug]") || [],
+    ).filter(function(item) {
+      return item instanceof HTMLElement;
+    });
+    var mobileBranchButtons = Array.from(
+      mobileRoot?.querySelectorAll(".exam-toc-branch-toggle[data-branch-toggle]") ||
+        [],
+    ).filter(function(button) {
+      return button instanceof HTMLButtonElement;
+    });
+
+    var setMobileOpen = function(open) {
+      if (!(mobileRoot instanceof HTMLElement))
+        return;
+
+      mobileRoot.dataset.open = open ? "true" : "false";
+
+      if (mobileToggle instanceof HTMLButtonElement) {
+        mobileToggle.setAttribute("aria-expanded", String(open));
+        mobileToggle.setAttribute("aria-label", open ? "隐藏目录" : "显示目录");
+      }
+    };
+    var syncDesktopVisibility = function() {
+      if (!(tocShell instanceof HTMLElement))
+        return;
+
+      var collapsed =
+        document.documentElement.dataset.examTocDesktop === "collapsed";
+      tocShell.dataset.collapsed = collapsed ? "true" : "false";
+      if (tocNav instanceof HTMLElement) {
+        tocNav.setAttribute("aria-hidden", String(collapsed));
+      }
+    };
+
+    var setBranchExpanded = function(items, buttons, slug, expanded) {
+      items.forEach(function(item) {
+        if (
+          !(item instanceof HTMLElement) ||
+          item.dataset.slug !== slug ||
+          item.querySelector(".exam-toc-children") === null
+        ) {
+          return;
+        }
+
+        item.dataset.expanded = expanded ? "true" : "false";
+      });
+
+      buttons.forEach(function(button) {
+        if (
+          !(button instanceof HTMLButtonElement) ||
+          button.dataset.branchToggle !== slug
+        ) {
+          return;
+        }
+
+        button.setAttribute("aria-expanded", String(expanded));
+      });
+    };
+    var setAllDesktopBranchesExpanded = function() {
+      desktopItems.forEach(function(item) {
+        if (
+          !(item instanceof HTMLElement) ||
+          item.querySelector(".exam-toc-children") === null
+        ) {
+          return;
+        }
+
+        item.dataset.expanded = "true";
+      });
+    };
+
+    syncDesktopVisibility();
+    setMobileOpen(false);
+    setAllDesktopBranchesExpanded();
+
+    var mobileManualState = {};
+    var mobileAutoExpanded = {};
+
+    var syncMobileBranch = function(slug) {
+      var manual = mobileManualState[slug];
+      var auto = mobileAutoExpanded[slug] || false;
+      var expanded;
+      if (manual === false) {
+        expanded = false;
+      } else if (manual === true || auto) {
+        expanded = true;
+      } else {
+        expanded = false;
+      }
+      setBranchExpanded(mobileItems, mobileBranchButtons, slug, expanded);
+    };
+
+    var syncAllMobileBranches = function() {
+      mobileItems.forEach(function(item) {
+        if (!(item instanceof HTMLElement) || !item.dataset.slug)
+          return;
+        if (item.querySelector(".exam-toc-children") === null)
+          return;
+        syncMobileBranch(item.dataset.slug);
+      });
+    };
+
+    mobileItems.forEach(function(item) {
+      if (!(item instanceof HTMLElement) || !item.dataset.slug)
+        return;
+      var initialExpanded = item.dataset.expanded === "true";
+      if (initialExpanded) {
+        mobileManualState[item.dataset.slug] = true;
+      }
+      setBranchExpanded(
+        mobileItems,
+        mobileBranchButtons,
+        item.dataset.slug,
+        initialExpanded,
+      );
+    });
+    window.addEventListener("examtocdesktopchange", syncDesktopVisibility);
+
+    mobileToggle?.addEventListener("click", function(event) {
+      event.preventDefault();
+      event.stopPropagation();
+      setMobileOpen(mobileRoot?.dataset.open !== "true");
+    });
+
+    mobileBackdrop?.addEventListener("click", function() {
+      setMobileOpen(false);
+    });
+
+    mobilePanel?.addEventListener("click", function(event) {
+      event.stopPropagation();
+    });
+
+    document.addEventListener("click", function(event) {
+      if (!(mobileRoot instanceof HTMLElement) || mobileRoot.dataset.open !== "true")
+        return;
+      if (mobilePanel instanceof HTMLElement && mobilePanel.contains(event.target))
+        return;
+      if (mobileToggle instanceof HTMLElement && mobileToggle.contains(event.target))
+        return;
+      setMobileOpen(false);
+    });
+
+    document.addEventListener("keydown", function(event) {
+      if (event.key === "Escape")
+        setMobileOpen(false);
+    });
+
+    mobileBranchButtons.forEach(function(button) {
+      if (!(button instanceof HTMLButtonElement))
+        return;
+
+      button.addEventListener("click", function(event) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        var slug = button.dataset.branchToggle;
+        if (!slug)
+          return;
+
+        var matchingItem = mobileItems.find(function(item) {
+          return (
+            item instanceof HTMLElement &&
+            item.dataset.slug === slug &&
+            item.querySelector(".exam-toc-children") !== null
+          );
+        });
+
+        var isCurrentlyExpanded = matchingItem?.dataset.expanded === "true";
+        mobileManualState[slug] = !isCurrentlyExpanded;
+        syncMobileBranch(slug);
+      });
+    });
+
+    if (tocLinks.length === 0)
+      return;
+
+    var seenSlugs = {};
+    var headingEntries = tocLinks
+      .map(function(link) {
+        if (!(link instanceof HTMLAnchorElement))
+          return null;
+
+        var slug = link.dataset.slug;
+        if (!slug || seenSlugs[slug])
+          return null;
+
+        var heading = document.getElementById(slug);
+        if (!(heading instanceof HTMLElement))
+          return null;
+
+        seenSlugs[slug] = true;
+        return {
+          slug: slug,
+          path: (link.dataset.path || slug).split("||").filter(Boolean),
+          heading: heading,
+        };
+      })
+      .filter(function(entry) {
+        return entry !== null;
+      });
+
+    if (headingEntries.length === 0)
+      return;
+
+    var activationOffset = 140;
+    var headingEntriesBySlug = {};
+    headingEntries.forEach(function(entry) {
+      headingEntriesBySlug[entry.slug] = entry;
+    });
+    var lastActiveSlug = "";
+    var programmaticScrollState = null;
+    var programmaticScrollFrame = 0;
+    var applyTocState = function(activeEntry) {
+      var activeSlug = activeEntry.slug;
+      var activePath = activeEntry.path;
+
+      tocLinks.forEach(function(link) {
+        if (!(link instanceof HTMLAnchorElement))
+          return;
+
+        var slug = link.dataset.slug || "";
+        var isActive = slug === activeSlug;
+        var isInPath = activePath.indexOf(slug) >= 0;
+
+        link.classList.toggle("is-active", isActive);
+        link.classList.toggle("is-in-path", isInPath && !isActive);
+
+        if (isActive)
+          link.setAttribute("aria-current", "location");
+        else
+          link.removeAttribute("aria-current");
+      });
+
+      setAllDesktopBranchesExpanded();
+
+      var newAutoExpanded = {};
+      activePath.forEach(function(slug) {
+        newAutoExpanded[slug] = true;
+      });
+      // Clear manual state for slugs whose auto state changed
+      mobileItems.forEach(function(item) {
+        if (!(item instanceof HTMLElement) || !item.dataset.slug)
+          return;
+        if (item.querySelector(".exam-toc-children") === null)
+          return;
+        var slug = item.dataset.slug;
+        var wasAuto = mobileAutoExpanded[slug] || false;
+        var isAuto = newAutoExpanded[slug] || false;
+        if (wasAuto !== isAuto) {
+          delete mobileManualState[slug];
+        }
+      });
+      mobileAutoExpanded = newAutoExpanded;
+      syncAllMobileBranches();
+
+      if (activeSlug !== lastActiveSlug) {
+        tocLinks.forEach(function(link) {
+          if (
+            !(link instanceof HTMLAnchorElement) ||
+            link.dataset.slug !== activeSlug
+          ) {
+            return;
+          }
+
+          var inMobile = link.closest(".exam-toc-mobile") !== null;
+          var inDesktop = link.closest(".exam-toc-shell") !== null;
+
+          if (inMobile && mobileRoot?.dataset.open !== "true")
+            return;
+          if (inDesktop && tocShell?.dataset.collapsed === "true")
+            return;
+
+          link.scrollIntoView({
+            block: "nearest",
+            inline: "nearest",
+          });
+        });
+
+        lastActiveSlug = activeSlug;
+      }
+    };
+    var syncTocState = function() {
+      var activeEntry = headingEntries[0];
+
+      for (var i = 0; i < headingEntries.length; i++) {
+        if (headingEntries[i].heading.getBoundingClientRect().top <= activationOffset)
+          activeEntry = headingEntries[i];
+        else
+          break;
+      }
+
+      applyTocState(activeEntry);
+    };
+    var clearProgrammaticScroll = function() {
+      if (programmaticScrollFrame) {
+        window.cancelAnimationFrame(programmaticScrollFrame);
+        programmaticScrollFrame = 0;
+      }
+      programmaticScrollState = null;
+    };
+    var watchProgrammaticScroll = function() {
+      if (!programmaticScrollState || programmaticScrollFrame)
+        return;
+
+      programmaticScrollFrame = window.requestAnimationFrame(function() {
+        programmaticScrollFrame = 0;
+
+        if (!programmaticScrollState)
+          return;
+
+        var elapsed = Date.now() - programmaticScrollState.startedAt;
+        var distance = Math.abs(
+          programmaticScrollState.heading.getBoundingClientRect().top -
+            activationOffset,
+        );
+
+        if (distance <= 6 || elapsed >= 1200) {
+          clearProgrammaticScroll();
+          requestSync();
+          return;
+        }
+
+        watchProgrammaticScroll();
+      });
+    };
+    var syncFrame = 0;
+    var requestSync = function() {
+      if (programmaticScrollState) {
+        watchProgrammaticScroll();
+        return;
+      }
+      if (syncFrame)
+        return;
+
+      syncFrame = window.requestAnimationFrame(function() {
+        syncFrame = 0;
+        syncTocState();
+      });
+    };
+
+    tocLinks.forEach(function(link) {
+      if (!(link instanceof HTMLAnchorElement))
+        return;
+
+      link.addEventListener("click", function(event) {
+        var slug = link.dataset.slug || "";
+        var entry = headingEntriesBySlug[slug];
+
+        setMobileOpen(false);
+
+        if (!entry)
+          return;
+
+        event.preventDefault();
+        applyTocState(entry);
+        programmaticScrollState = {
+          slug: entry.slug,
+          heading: entry.heading,
+          startedAt: Date.now(),
+        };
+
+        if (window.history && typeof window.history.pushState === "function") {
+          window.history.pushState(null, "", "#" + entry.slug);
+        } else {
+          window.location.hash = entry.slug;
+        }
+
+        entry.heading.scrollIntoView({
+          block: "start",
+          behavior: "smooth",
+        });
+        watchProgrammaticScroll();
+      });
+    });
+
+    syncTocState();
+    window.addEventListener("scroll", requestSync, { passive: true });
+    window.addEventListener("resize", requestSync, { passive: true });
+    window.addEventListener("hashchange", requestSync);
+    window.addEventListener("load", syncTocState);
+    window.addEventListener("examtocdesktopchange", syncTocState);
+  };
+
+  if (document.readyState === "loading")
+    document.addEventListener("DOMContentLoaded", initExamToc, { once: true });
+  else
+    initExamToc();
+</script> <div class="exam-page-main"> <aside class="mb-6 overflow-hidden rounded-[8px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900 lg:float-right lg:mb-8 lg:ml-6 lg:w-[22rem]"> <div class="border-b border-slate-200 px-4 py-3 dark:border-slate-800"> <p class="m-0 text-sm font-semibold tracking-wide text-slate-600 dark:text-slate-300">
+试题信息
+</p> </div> <dl class="divide-y divide-slate-200 text-sm dark:divide-slate-800"> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">时间</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> 2024-2025学年第一学期 </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">科目</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> <a href="https://byrdocs.org/?c=test&#38;q=英语听说2">英语听说2</a> </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">阶段</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> 期末 </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">类型</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> 本科 </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">学院</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> 智能工程与自动化学院、计算机学院、电子工程学院、人工智能学院、理学院、数字媒体与设计艺术学院、网络空间安全学院、经济管理学院、人文学院、信息与通信工程学院、集成电路学院 </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">来源</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> <a href="https://byrdocs.org/?c=test&#38;q=3e29f95134df9992312fc4428db67f5b" target="_blank">
+BYR Docs 文件
+</a> </dd> </div> <div class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3 px-4 py-3"> <dt class="font-medium text-slate-500 dark:text-slate-400">答案完成度</dt> <dd class="m-0 min-w-0 break-words text-slate-800 dark:text-slate-100"> <span class="font-semibold text-red-600 dark:text-red-400">残缺</span> </dd> </div> </dl> </aside>  <h2 id="part-i-listening-comprehension-50-points-2-points--per">Part I Listening Comprehension (50 points, 2 points / per)</h2>
+<figure class="exam-audio"> <audio class="exam-audio-player" controls preload="none" src="https://attach.wiki.byrdocs.org/24-25-1-英语听说2-期末-听力音频.mp3">
+浏览器不支持音频播放。
+</audio> <figcaption class="exam-audio-caption"><p>听力音频</p></figcaption> </figure>
+<h3 id="section-a">Section A</h3>
+<p><em>In this section, you will hear several news reports. At the end of each news report, you will hear two or three questions. Both the news report and the questions will be spoken only once. After you hear a question, you must choose the best answer from the four choices marked A), B), C) and D).</em></p>
+<h4 id="news-item-one">News Item One</h4>
+<p><strong>Question 1 to 2 are based on the recording you have just heard.</strong></p>
+<fieldset aria-label="第 1 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 1 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Didi Chuxing is a Chinese ride hailing app.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Didi Chuxing had received a $600million investment from China Life.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Didi Chuxing had received a $1billion investment from US tech group Apple in May.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">China Life is the second largest state-owned commercial insurer in China.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> <script type="module">const x=c=>String.fromCharCode(65+c),C=document.querySelectorAll(".exam-choices:not([data-exam-choices-ready])");C.forEach((c,S)=>{if(!(c instanceof HTMLFieldSetElement))return;c.setAttribute("data-exam-choices-ready","true");const b=c.getAttribute("data-multiple")==="true",i=[...c.querySelectorAll(".exam-choice-option")],r=c.querySelector(".exam-choices-submit"),d=i.some(e=>e.getAttribute("data-answer")==="true"),u=`choice:${S}`,o=window.__examState,y=`exam-choices-${S}`;if(c.setAttribute("data-has-answer",d?"true":"false"),c.setAttribute("data-revealed","false"),i.forEach((e,t)=>{const s=x(t);e.setAttribute("data-choice",s);const a=e.querySelector(".exam-choice-input"),n=e.querySelector(".exam-choice-letter");a instanceof HTMLInputElement&&(a.type=b?"checkbox":"radio",a.name=y,a.value=s),n&&(n.textContent=`${s}.`)}),!(r instanceof HTMLButtonElement))return;const h=()=>{i.forEach(e=>e.classList.remove("is-correct","is-wrong","is-missed")),r.classList.remove("is-all-correct","is-not-all-correct")},E=()=>i.flatMap(e=>{const t=e.querySelector(".exam-choice-input"),s=e.getAttribute("data-choice")??"";return t instanceof HTMLInputElement&&t.checked&&s?[s]:[]}),l=(e,t)=>{o?.update?.(s=>{const a={...s.choices},n=E();return!e&&n.length===0?delete a[u]:a[u]={selected:n,revealed:e,mode:e?t:void 0},{...s,choices:a}}),o?.sync?.()},L=e=>{const t=new Set(e);i.forEach(s=>{const a=s.querySelector(".exam-choice-input"),n=s.getAttribute("data-choice")??"";a instanceof HTMLInputElement&&(a.checked=t.has(n))})},v=()=>{h(),c.setAttribute("data-revealed","false"),c.removeAttribute("data-reveal-mode"),l(!1)},f=()=>{let e=!0;h(),i.forEach(t=>{const s=t.querySelector(".exam-choice-input"),a=t.getAttribute("data-answer")==="true",n=s instanceof HTMLInputElement&&s.checked;a?n?t.classList.add("is-correct"):(t.classList.add("is-missed"),e=!1):n&&(t.classList.add("is-wrong"),e=!1)}),r.classList.add(e?"is-all-correct":"is-not-all-correct"),c.setAttribute("data-revealed","true"),c.setAttribute("data-reveal-mode","checked"),l(!0,"checked")},m=()=>{h(),i.forEach(e=>{const t=e.querySelector(".exam-choice-input"),s=e.getAttribute("data-answer")==="true",a=t instanceof HTMLInputElement&&t.checked;s?e.classList.add("is-correct"):a&&e.classList.add("is-wrong")}),c.setAttribute("data-revealed","true"),c.setAttribute("data-reveal-mode","answers"),l(!0,"answers")},A=()=>{const e=o?.read?.().choices?.[u];e&&L(e.selected),!(!d||!e?.revealed)&&(e.mode==="answers"?m():f())},w=()=>{const e=c.getAttribute("data-reveal-mode");c.getAttribute("data-revealed")!=="true"?l(!1):e==="answers"?m():f()};if(!d){r.disabled=!0,r.textContent="暂无答案",A(),i.forEach(e=>{const t=e.querySelector(".exam-choice-input");t instanceof HTMLInputElement&&t.addEventListener("change",()=>l(!1))}),o?.sync?.();return}A(),i.forEach(e=>{const t=e.querySelector(".exam-choice-input");t instanceof HTMLInputElement&&t.addEventListener("change",w)}),r.addEventListener("click",f),window.addEventListener(o?.events?.setAll??"examsetall",e=>{e instanceof CustomEvent&&e.detail?.revealed===!0?m():v()}),o?.sync?.()});</script>
+<fieldset aria-label="第 2 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 2 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">87%.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">99%.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">30%.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">35%.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<h4 id="news-item-two">News Item Two</h4>
+<p><strong>Question 3 to 4 are based on the recording you have just heard.</strong></p>
+<fieldset aria-label="第 3 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 3 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Their interests are quite similar.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">They are generally the same age.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Their brains work in harmony.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">They have the same ethnic background.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<fieldset aria-label="第 4 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 4 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It can work both ways.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It is hard to predict.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It can be touching.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It resembles family ties.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<h4 id="news-item-three">News Item Three</h4>
+<p><strong>Question 5 to 6 are based on the recording you have just heard.</strong></p>
+<fieldset aria-label="第 5 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 5 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Surprising rise in global sea levels.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Dangerous ice melts in Greenland.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Changing weather patterns in summer.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Record growth of Greenland’s ice sheets.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<fieldset aria-label="第 6 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 6 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It began in late May.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It lasted three months.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It started a month earlier than usual.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It ended a month earlier than before.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<h3 id="section-b">Section B</h3>
+<p><em>In this section, you will hear several conversations. At the end of each conversation, one or more questions will be asked about what was said. Both the conversations and the questions will be spoken only once. After each question there will be a pause. During the pause, you must read the four choices marked A), B), C) and D), and decide which is the best answer.</em></p>
+<h4 id="conversation-one">Conversation One</h4>
+<p><strong>Question 7 to 10 are based on the recording you have just heard.</strong></p>
+<fieldset aria-label="第 7 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 7 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It is being debated by hundreds of retirees.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It is attracting many people’s attention.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It partly records his own experience.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It argues for postponing retirement.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<fieldset aria-label="第 8 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 8 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">One should foresee a financial crisis.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">One should trust financial planners’ figures.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">One should have one million dollars to retire.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">One should start saving as early as possible.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<fieldset aria-label="第 9 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 9 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It doesn’t need to be permanent.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It shouldn’t be considered risky.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It helps to reduce travel expenses.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It is the way to quit a job one hates.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<fieldset aria-label="第 10 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 10 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">By keeping close contact with one’s employers.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">By following the counsel of financial planners.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">By retiring when one reaches sixty years old.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">By investing half of one’s monthly income.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<h4 id="conversation-two">Conversation Two</h4>
+<p><strong>Question 11 to 14 are based on the recording you have just heard.</strong></p>
+<fieldset aria-label="第 11 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 11 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">One.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Two.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Three.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Four.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<fieldset aria-label="第 12 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 12 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Spices are healthy.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">There are different styles of life.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Variety is good for our health.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Variety is necessary for us.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<fieldset aria-label="第 13 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 13 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">10 times more than what we have now.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">300 times more than what we have now.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">3000 different food items that they would rotate.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Not known yet.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<fieldset aria-label="第 14 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 14 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">We should eat natural foods.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Some processed food could make us stay healthy.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Eating an apple every day is good for our health.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">We should make sure we have diet variety.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<h3 id="section-c">Section C</h3>
+<p><em>In this section, you will hear several short passages. At the end of each passage, you will hear some questions. Both the passage and the questions will be spoken only once. After you hear a question, you must choose the best answer from the four choices marked A), B), C) and D).</em></p>
+<h4 id="passage-one">Passage One</h4>
+<p><strong>Question 15 to 18 are based on the recording you have just heard.</strong></p>
+<fieldset aria-label="第 15 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 15 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Work hard and plan carefully.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Attempt to succeed at any cost.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Aim high and expect great results.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Remain optimistic even in difficulty.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<fieldset aria-label="第 16 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 16 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Regarding failure as something inevitable.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Trying out innovative marketing strategies.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Venturing into sectors never explored before.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Being willing to experiment with novel ideas.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<fieldset aria-label="第 17 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 17 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Expect future success so as to move forward.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Learn from our failure and forge ahead.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Distinguish between good and bad risks.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Examine our strategies and find out weaknesses.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<fieldset aria-label="第 18 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 18 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Fresher offers.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Safer operation.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">More challenges.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Less competition.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<h4 id="passage-two">Passage Two</h4>
+<p><strong>Question 19 to 22 are based on the recording you have just heard.</strong></p>
+<fieldset aria-label="第 19 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 19 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">People tend to communicate in a loving way.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">People tend to lose their loving feelings.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">People are likely to express their feelings.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">People are likely to become unfriendly.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<fieldset aria-label="第 20 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 20 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">She unknowingly tends to blame her partner.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">She remembers that her partner is doing the best he can.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">She becomes judgmental of her partner and his feelings.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">She remembers that her partner is sensitive.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<fieldset aria-label="第 21 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 21 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Talk face to face with your partner.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Listen to your own feelings.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Write a letter to your partner.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Worry about hurting your partner.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<fieldset aria-label="第 22 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 22 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">You automatically become more loving.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">You may no longer feel a need to talk.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">You could be inspired to do something loving for your partner.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">You may admit your own mistakes to your partner.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<h3 id="section-d">Section D</h3>
+<p><em>In this section, you will hear recordings of lectures or talks followed by some questions. The recordings will be played only once. After you hear a question, you must choose the best answer from the four choices marked A), B), C) and D).</em></p>
+<p><strong>Question 23 to 25 are based on the recording you have just heard.</strong></p>
+<fieldset aria-label="第 23 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 23 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Health benefits of running marathons.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Running is taking care of yourself.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Why our life is like a marathon race.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">How to prepare for a marathon race.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<fieldset aria-label="第 24 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 24 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Big success worth more celebration than small ones.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Once you make a decision, keep to it till you’ve made it.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Landing the perfect job is the key to a successful life.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Small achievements are essential for reaching goals.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<fieldset aria-label="第 25 题选项" class="exam-choices single" data-multiple="false"> <div class="exam-choices-item">第 25 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">They should be avoided at all costs.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">They are impassable barriers to success.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">They are good learning opportunities.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">They indicate that goals are unattainable.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<h2 id="part-ii-reading-comprehension-20-points-2-points--per">Part II Reading Comprehension (20 points, 2 points / per)</h2>
+<p><strong>Directions</strong>: <em>There are two passages in this section. Each passage is followed by some questions or unfinished statements For each of them there are four choices marked A), B), C) and D). You should decide on the best choice.</em></p>
+<h3 id="passage-one-1">Passage One</h3>
+<p>In 2020, the Nobel Peace Prize was awarded to the World Food Program (WFP).</p>
+<p>Why a Nobel Prize for the WFP, and why now? In 2019, the WFP assisted nearly 100 million people in 88 countries. It is the safety net for those who falloff the edge of existence. It is a response to solving the problem of food instability. Its Nobel Prize reminds us all of the moral hazard in imagining that the poor and vulnerable are somebody else’s problem.</p>
+<p>The WFP has been around since 1961 and has been the global coordinator of nationally based efforts to avoid disasters with food aid. Despite decades of effort to eliminate hunger, the latest estimate is that about 11% of people on the planet (about 820 million people) are suffering daily undernourishment. Progress at reducing undernourishment has stopped despite gains through the 1990s and 2000s.</p>
+<p>Developed countries sometimes offer food and aid to developing ones, but at a price. One American philosopher stated that addressing the needs of the poor and vulnerable is about more than money—it is mostly about creating conditions under which prosperity and opportunity can thrive. When aid is offered with heavy conditions attached, like loan repayment or food for resources, it often widens the gap between rich and poor and sustains the old world order. This is why the work of the WFP is so vital.</p>
+<p>The scientific community, however, can provide a helping hand to the WFP. By sharing knowledge of agriculture and climate with peers in countries most vulnerable to poverty and hunger, scientists can help reduce these problems. By making its voice heard, science can lead by example. The ability to overcome food shortages that must be built into some of the poorest countries will not come from loans from wealthy countries, which may have food problems of their own, or world economic institutions. This ability will be built upon self-confident people using open and shared scientific knowledge to pull themselves out of their misery.</p>
+<ol start="26">
+<li>What does the WFP’s winning of the Nobel Peace Prize make us realize?</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">More and more people in the world are suffering from starvation.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">All of us can be affected by food instability one way or another.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It is hazardous to leave millions of people poor and vulnerable.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It is morally wrong to think helping the poor is not our business.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="27">
+<li>What do we learn about the WFP’s effort to eliminate hunger?</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It has ensured a sufficient food supply to millions.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It is still far from its goal despite the progress made.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It has done a good job in combating natural disasters.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It is preventing starvation occurring on a global scale.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="28">
+<li>What will happen when food aid is offered at a price?</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">The rich will become richer and the poor poorer.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">More people will be willing to join in the effort.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">More food will be made available to the needy.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">The relief effort will be rendered less sustainable.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="29">
+<li>How can scientists help cope with poverty and hunger?</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">By collaborating closely with world economic institutions.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">By sharing expertise with peers in poverty-stricken nations.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">By setting up more food research programs in developing countries.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">By building self-respect in people suffering from under nutrition.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="30">
+<li>What message does the author try to convey at the end of the passage?</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Wealthy nations should solve their own food problems first.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Rich countries should be more generous in providing food aid.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Poor nations should enhance their own ability to solve their food shortages.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">World economic institutions should play a bigger role in fighting hunger.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<h3 id="passage-two-1">Passage Two</h3>
+<p>Interactive television advertising, which allows viewers to use their remote controls to click on advertisements, has been pushed for years. Nearly a decade ago it was predicted that viewers of “Friends,” a popular situation comedy, would soon be able to purchase a sweater like Jennifer Aniston’s with a few taps on their remote control. “It’s been the year of interactive television advertising for the last ten or twelve years,” says Colin Dixon of a digital-media consultancy.</p>
+<p>So, the news that Cablevision, an American cable company, was rolling out interactive advertisements to all its customers on October 6th was greeted with some skepticism. During commercials, an overlay will appear at the bottom of the screen, prompting viewers to press a button to request a free sample or order a catalog. Cablevision 8 hopes to allow customers to buy things with their remote controls early next year.</p>
+<p>Television advertising could do with a boost. Spending fell by 10% in the first half of the year. The popularization of digital video recorders has caused advertisers to worry that their commercials will be skipped. Some are turning to the Internet, which is cheaper and offers concrete measurements like click-through rates—especially important at a time when marketing budgets are tight. With the launch of interactive advertising, “many of the dollars that went to the Internet will come back to the TV,” says David Kline of Cablevision. Or so the industry hopes.</p>
+<p>In theory, interactive advertising can engage viewers in a way that 30-second spots do not. Unilever recently ran an interactive campaign for its Axe deodorant (除臭剂), which kept viewers engaged for more than three minutes on average.</p>
+<p>The amount spent on interactive advertising on television is still small. Magna, an advertising agency, reckons it will be worth about $138 million this year. That falls far short of the billions of dollars people once expected it to generate. But DirecTv, Comcast and Time Warner Cable have all invested in it. A new effort led by Canoe Ventures, a coalition of leading cable providers, aims to make interactive advertising available across America later this year. BrightLine iTV, which designs and sells interactive ads, says interest has surged: it expects its revenues almost to triple this year. BSkyB, Britain’s biggest satellite television service, already provides 9 million customers with interactive ads.</p>
+<p>Yet there are doubts about whether people watching television, a “lean back” medium, crave interaction. Click-through rates have been high so far (around 3-4%, compared with less than 0.3% online), but that may be a result of the novelty. Interactive ads and viewers might not go well together.</p>
+<ol start="31">
+<li>What does Colin Dixon mean by saying “It’s been the year of interactive television advertising for the last ten or twelve years” (Lines 3—4, Para.1)?</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Interactive television advertising will become popular in 10—12 years.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Interactive television advertising has been under debate for the last decade or so.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Interactive television advertising is successful when incorporated into situation comedies.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Interactive television advertising has not achieved the anticipated results.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="32">
+<li>What is the public’s response to Cablevision’s planned interactive TV advertising program?</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Pretty positive.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Totally indifferent.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Somewhat doubtful.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Rather critical.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="33">
+<li>What is the impact of the wide use of digital video recorders on TV advertising?</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It has made TV advertising easily accessible to viewers.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It helps advertisers to measure the click-through rates.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It has placed TV advertising at a great disadvantage.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It enables viewers to check the sales items with ease.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="34">
+<li>What do we learn about Unilever’s interactive campaign?</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It proves the advantage of TV advertising.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It has done well in engaging the viewers.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It helps attract investments in the company.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">It has boosted the TV advertising industry.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="35">
+<li>How does the author view the hitherto high click-through rates?</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">They may be due to the novel way of advertising.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">They signify the popularity of interactive advertising.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">They point to the growing curiosity of TV viewers.</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">They indicate the future direction of media reform.</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<h2 id="part-iii-vocabulary-30-points-2-points--per">Part III Vocabulary (30 points, 2 points / per)</h2>
+<p><strong>Directions</strong>: <em>There are a number of incomplete sentences in this part. For each sentence, there are four choices marked A), B), C) and D). Choose the ONE that best completes the sentence.</em></p>
+<ol start="36">
+<li>Any changes to its healthcare coverage can have a <span class="exam-slot">(  )</span> effect.</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">folk</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">particle</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">pebble</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">ripple</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="37">
+<li>Greater diversity can broaden our conceptions of art, history, music, language studies and other arts and <span class="exam-slot">(  )</span>.</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">humane</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">human</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">humanism</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">humanities</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="38">
+<li>They take touching as a cultural <span class="exam-slot">(  )</span> in social interactions.</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">mandate</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">norm</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">order</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">signature</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="39">
+<li>I have narrowed it down <span class="exam-slot">(  )</span> one of two employees, both of whom work in the company.</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">from</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">to</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">in</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">with</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="40">
+<li>They offer suggestions on a <span class="exam-slot">(  )</span> of issues such as what to do if you are having problems with your computer.</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">descriptor</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">precedent</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">multitude</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">catalyst</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="41">
+<li>The workers have still not been for their loss of wages.</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">compensated</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">filtered</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">cemented</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">conformed</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="42">
+<li>The media’s coverage of the election has been <span class="exam-slot">(  )</span> from the very beginning.</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">scattered</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">splashed</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">skewed</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">screamed</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="43">
+<li>Don’t take any day, moment, person, experience for <span class="exam-slot">(  )</span>.</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">ensured</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">granted</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">guaranteed</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">mistaken</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="44">
+<li>As the world population is rapidly growing, the supply of <span class="exam-slot">(  )</span> land is shrinking.</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">developed</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">fertile</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">deserted</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">barren</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="45">
+<li>From my <span class="exam-slot">(  )</span> , I don’t think we should pursue renewables simply because they might create more jobs.</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">prediction</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">belief</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">perspective</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">attitude</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="46">
+<li>His lack of <span class="exam-slot">(  )</span> in running such a large factory led to serious production problems.</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">coverage</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">personality</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">expertise</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">intuition</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="47">
+<li>Per <span class="exam-slot">(  )</span> income in Norway has grown steadily over the past decade.</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">people</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">capita</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">capital</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">cap</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="48">
+<li>Your manager will <span class="exam-slot">(  )</span> with potential buyers, keeping you informed of offers and how the sale is progressing</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">degrade</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">mandate</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">deplete</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">negotiate</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="49">
+<li>The National Basketball <span class="exam-slot">(  )</span> negotiates TV rights for important games.</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Unit</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Society</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Association</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">Group</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> 
+<ol start="50">
+<li>The government should do more to promote <span class="exam-slot">(  )</span> agriculture.</li>
+</ol>
+<fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">suspension</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">sustainable</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">suspense</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">industrial</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset>   <details id="related-exams" class="related-exams mt-8 overflow-hidden rounded-[8px] border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900" open data-astro-cid-a6434jl4> <summary class="flex cursor-pointer list-none items-center justify-between px-4 py-3 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50" data-astro-cid-a6434jl4> <p class="m-0 text-sm font-semibold tracking-wide text-slate-600 dark:text-slate-300" data-astro-cid-a6434jl4>
+《英语听说2》的期末试卷
+</p> <svg class="related-exams-chevron h-4 w-4 flex-none text-slate-400 transition-transform duration-200 dark:text-slate-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-astro-cid-a6434jl4> <polyline points="6 9 12 15 18 9" data-astro-cid-a6434jl4></polyline> </svg> </summary> <ul class="divide-y divide-slate-200 text-sm dark:divide-slate-800" data-astro-cid-a6434jl4> <li class="flex min-h-14 items-center justify-between gap-3 px-4 py-2" data-astro-cid-a6434jl4> <div class="min-w-0" data-astro-cid-a6434jl4> <span class="block truncate leading-6 text-slate-700 dark:text-slate-300" aria-current="page" data-astro-cid-a6434jl4> 24-25-1-英语听说2-期末 </span> </div> <div class="flex flex-none items-center gap-2" data-astro-cid-a6434jl4> <span class="inline-flex h-5 items-center rounded-md bg-sky-100 px-2 text-xs font-semibold leading-none text-sky-800 dark:bg-sky-900/60 dark:text-sky-200" data-astro-cid-a6434jl4>
+当前
+</span>  </div> </li> </ul> </details> <script type="module">(function(){var t="relatedExamsExpanded",e=document.getElementById("related-exams");if(e)try{var a=localStorage.getItem(t);a!==null&&(e.open=a==="true"),e.addEventListener("toggle",function(){localStorage.setItem(t,String(e.open))})}catch{}})();</script> </div> </div> <div class="floating-toolbar" id="examToolbar" data-expanded="false"> <div class="floating-toolbar-actions" id="examToolbarActions"> <button class="floating-toolbar-control cursor-pointer transition-opacity active:scale-95" id="backToTop" type="button" aria-label="回到顶部" data-tooltip="回到顶部" data-toolbar-action> <svg aria-hidden="true" class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"> <path d="M18 15l-6-6-6 6"></path> </svg> </button> <button class="floating-toolbar-control exam-toolbar-toc-toggle cursor-pointer active:scale-95" id="examTocMobileToggle" type="button" aria-label="显示目录" aria-expanded="false" data-tooltip="目录" data-toolbar-action> <svg aria-hidden="true" class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"> <path d="M9 6h10"></path> <path d="M9 12h10"></path> <path d="M9 18h10"></path> <circle cx="5" cy="6" r="1" fill="currentColor" stroke="none"></circle> <circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"></circle> <circle cx="5" cy="18" r="1" fill="currentColor" stroke="none"></circle> </svg> </button> <a class="no-underline floating-toolbar-control active:scale-95" href="https://github.com/byrdocs/byrdocs-neowiki/edit/master/exams/24-25-1-%E8%8B%B1%E8%AF%AD%E5%90%AC%E8%AF%B42-%E6%9C%9F%E6%9C%AB/index.mdx" aria-label="在 GitHub 上编辑" data-tooltip="在 GitHub 上编辑" data-toolbar-action> <svg aria-hidden="true" class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"> <path d="M12 20h9"></path> <path d="m16.5 3.5 4 4L8 20l-5 1 1-5 12.5-12.5Z"></path> </svg> </a> <button class="floating-toolbar-control cursor-pointer active:scale-95" id="examPrint" type="button" aria-label="打印试卷" data-tooltip="打印试卷" data-toolbar-action> <svg aria-hidden="true" class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"> <polyline points="6 9 6 2 18 2 18 9"></polyline> <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path> <rect x="6" y="14" width="12" height="8"></rect> </svg> </button> <button class="floating-toolbar-control cursor-pointer active:scale-95 disabled:cursor-default disabled:opacity-50" id="examAnswersToggle" type="button" aria-label="显示全部答案" aria-pressed="false" data-tooltip="显示全部答案" data-toolbar-action> <svg aria-hidden="true" class="h-5 w-5" data-exam-toggle-icon="show" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"> <path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6Z"></path> <circle cx="12" cy="12" r="3"></circle> </svg> <svg aria-hidden="true" class="h-5 w-5" data-exam-toggle-icon="hide" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"> <path d="M3 3l18 18"></path> <path d="M10.6 10.7a2 2 0 0 0 2.7 2.7"></path> <path d="M9.4 5.6A10.7 10.7 0 0 1 12 5.2c6.4 0 10 6 10 6a17.7 17.7 0 0 1-4.1 4.6"></path> <path d="M6.2 6.3C3.7 8 2 10.8 2 10.8s3.6 6 10 6c1.2 0 2.4-.2 3.4-.6"></path> </svg> </button> </div> <button class="floating-toolbar-control floating-toolbar-toggle cursor-pointer active:scale-95" id="examToolbarToggle" type="button" aria-label="展开工具栏" aria-expanded="false" aria-controls="examToolbarActions" data-tooltip="展开工具栏"> <svg aria-hidden="true" class="h-5 w-5" data-toolbar-toggle-icon="open" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"> <path d="M12 5v14"></path> <path d="M5 12h14"></path> </svg> <svg aria-hidden="true" class="h-5 w-5" data-toolbar-toggle-icon="close" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"> <path d="m18 6-12 12"></path> <path d="M6 6l12 12"></path> </svg> </button> </div>  <script>
+  var examToolbar = document.getElementById("examToolbar");
+  var examToolbarToggle = document.getElementById("examToolbarToggle");
+  var examAnswersToggle = document.getElementById("examAnswersToggle");
+  var backToTop = document.getElementById("backToTop");
+  var examPrint = document.getElementById("examPrint");
+  var setExamToolbarExpanded = function(expanded) {
+    if (!(examToolbar instanceof HTMLElement)) return;
+    examToolbar.dataset.expanded = expanded ? "true" : "false";
+    if (examToolbarToggle instanceof HTMLButtonElement) {
+      examToolbarToggle.setAttribute("aria-expanded", String(expanded));
+      examToolbarToggle.setAttribute(
+        "aria-label",
+        expanded ? "收起工具栏" : "展开工具栏",
+      );
+      examToolbarToggle.dataset.tooltip = expanded ? "收起工具栏" : "展开工具栏";
+    }
+  };
+  var toggleExamToolbarExpanded = function() {
+    setExamToolbarExpanded(examToolbar?.dataset.expanded !== "true");
+  };
+
+  setExamToolbarExpanded(false);
+  examToolbarToggle?.addEventListener("click", function(event) {
+    event.stopPropagation();
+    toggleExamToolbarExpanded();
+  });
+  examToolbar?.querySelectorAll("[data-toolbar-action]").forEach(function(control) {
+    control.addEventListener("click", function() {
+      setExamToolbarExpanded(false);
+    });
+  });
+  document.addEventListener("click", function(event) {
+    if (!(examToolbar instanceof HTMLElement) || examToolbar.dataset.expanded !== "true")
+      return;
+    if (examToolbar.contains(event.target))
+      return;
+    setExamToolbarExpanded(false);
+  });
+  document.addEventListener("keydown", function(event) {
+    if (event.key === "Escape")
+      setExamToolbarExpanded(false);
+  });
+
+  // Back to top
+  var updateBackToTopVisibility = function() {
+    if (!backToTop) return;
+    backToTop.classList.toggle("is-visible", window.scrollY > 200);
+  };
+  updateBackToTopVisibility();
+  window.addEventListener("scroll", updateBackToTopVisibility, { passive: true });
+  backToTop?.addEventListener("click", function() {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+
+  // Print preparation (works for both Ctrl+P and print button)
+  var printUrlFooter = null;
+  var prePrintState = null;
+  window.addEventListener("beforeprint", function() {
+    // Save current state to restore after print
+    prePrintState = {
+      blanks: [],
+      solutions: [],
+      choices: []
+    };
+    // Reveal all answers
+    if (!window.__examState?.getAllShown?.()) {
+      window.__examState?.toggleAll?.();
+      prePrintState.wasHidden = true;
+    }
+    // Open all <details> solutions
+    document.querySelectorAll(".exam-solution:not([open])").forEach(function(el) {
+      el.setAttribute("open", "");
+      prePrintState.solutions.push(el);
+    });
+    // Show all blanks
+    document.querySelectorAll(".exam-blank[aria-pressed='false']").forEach(function(el) {
+      el.setAttribute("aria-pressed", "true");
+      prePrintState.blanks.push(el);
+    });
+    // Reveal all choice answers
+    document.querySelectorAll(".exam-choices[data-has-answer='true'][data-revealed='false']").forEach(function(group) {
+      group.querySelectorAll(".exam-choice-option").forEach(function(opt) {
+        if (opt.getAttribute("data-answer") === "true") {
+          opt.classList.add("is-correct");
+          var input = opt.querySelector(".exam-choice-input");
+          if (input) input.checked = true;
+        }
+      });
+      group.setAttribute("data-revealed", "true");
+      prePrintState.choices.push(group);
+    });
+    // Add print footer
+    printUrlFooter = document.createElement("div");
+    printUrlFooter.className = "print-footer";
+    printUrlFooter.style.display = "none";
+    printUrlFooter.innerHTML =
+      '本页面打印自 <a href="' + window.location.href + '">' + window.location.href + '</a><br>' +
+      '来源：<a href="https://wiki.byrdocs.org">BYR Docs 维基真题</a><br>' +
+      '除非另有声明，本文件内容采用 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> 授权。';
+    document.querySelector(".wiki-content")?.appendChild(printUrlFooter);
+  });
+  window.addEventListener("afterprint", function() {
+    // Remove URL footer
+    if (printUrlFooter) { printUrlFooter.remove(); printUrlFooter = null; }
+    // Restore previous state
+    if (!prePrintState) return;
+    if (prePrintState.wasHidden) {
+      window.__examState?.toggleAll?.();
+    }
+    prePrintState.solutions.forEach(function(el) { el.removeAttribute("open"); });
+    prePrintState.blanks.forEach(function(el) { el.setAttribute("aria-pressed", "false"); });
+    prePrintState.choices.forEach(function(group) {
+      group.querySelectorAll(".exam-choice-option").forEach(function(opt) {
+        opt.classList.remove("is-correct");
+        var input = opt.querySelector(".exam-choice-input");
+        if (input) input.checked = false;
+      });
+      group.setAttribute("data-revealed", "false");
+    });
+    prePrintState = null;
+  });
+
+  // Print button just triggers window.print()
+  examPrint?.addEventListener("click", function() { window.print(); });
+
+  // Answers toggle
+  var updateExamAnswersToggle = function() {
+    if (!(examAnswersToggle instanceof HTMLButtonElement)) return;
+    var hasRevealable = window.__examState?.hasRevealable?.() ?? false;
+    var allShown = hasRevealable && (window.__examState?.getAllShown?.() ?? false);
+    var label = allShown ? "隐藏全部答案" : "显示全部答案";
+    var tooltip = hasRevealable ? label : "暂无可显示答案";
+    examAnswersToggle.disabled = !hasRevealable;
+    examAnswersToggle.dataset.state = allShown ? "shown" : "hidden";
+    examAnswersToggle.dataset.tooltip = tooltip;
+    examAnswersToggle.setAttribute("aria-label", label);
+    examAnswersToggle.setAttribute("aria-pressed", "" + allShown);
+  };
+  updateExamAnswersToggle();
+  window.addEventListener(
+    window.__examState?.events?.change ?? "examstatechange",
+    updateExamAnswersToggle,
+  );
+  examAnswersToggle?.addEventListener("click", function() {
+    window.__examState?.toggleAll?.();
+  });
+  requestAnimationFrame(function() { window.__examState?.sync?.(); });
+</script>  </article> </main>  <footer class="mt-10 border-t border-slate-200/80 bg-white/70 dark:border-slate-800 dark:bg-slate-950/70"> <div class="mx-auto flex w-full max-w-6xl flex-col items-center gap-3 px-4 py-5 sm:px-6 lg:px-8"> <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-sm text-slate-500 dark:text-slate-400"> <a class="no-underline text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200" href="https://github.com/byrdocs">GitHub</a> <span class="text-slate-300 dark:text-slate-700">·</span> <a class="no-underline text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200" href="https://byrdocs.org">BYR Docs</a> <span class="text-slate-300 dark:text-slate-700">·</span> <a class="no-underline text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200" href="https://qm.qq.com/cgi-bin/qm/qr?k=plu_KgkqxI4Dw-FwW1aFQDQ0hL062WNV&jump_from=webapi&authKey=09aiBE16MH9jTfmgmGtCjMRsvpazAMkvLcG35mdICYHe2+FKF51qqSIdUC0dVxkh">QQ 群</a> </div> <p class="m-0 text-center text-xs text-slate-400 dark:text-slate-500">
+除非另有声明，本网站内容采用 <a class="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300" href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> 授权。
+</p> </div> </footer> </div> <script>
+          var initExamTocDesktopToggle = function() {
+            var button = document.getElementById("examTocDesktopToggle");
+            if (!(button instanceof HTMLButtonElement))
+              return;
+
+            var storageKey = "exam-toc-desktop-collapsed";
+            var getCollapsed = function() {
+              return document.documentElement.dataset.examTocDesktop === "collapsed";
+            };
+            var syncButton = function() {
+              var collapsed = getCollapsed();
+              button.dataset.state = collapsed ? "collapsed" : "expanded";
+              button.setAttribute("aria-expanded", String(!collapsed));
+              button.setAttribute(
+                "aria-label",
+                collapsed ? "展开目录侧边栏" : "折叠目录侧边栏",
+              );
+            };
+            var setCollapsed = function(collapsed) {
+              document.documentElement.dataset.examTocDesktop = collapsed
+                ? "collapsed"
+                : "expanded";
+              try {
+                window.localStorage.setItem(
+                  storageKey,
+                  collapsed ? "true" : "false",
+                );
+              } catch {}
+              syncButton();
+              window.dispatchEvent(
+                new CustomEvent("examtocdesktopchange", {
+                  detail: { collapsed: collapsed },
+                }),
+              );
+            };
+
+            syncButton();
+            button.addEventListener("click", function() {
+              setCollapsed(!getCollapsed());
+            });
+            window.addEventListener("examtocdesktopchange", syncButton);
+            window.__examTocDesktop = {
+              getCollapsed: getCollapsed,
+              setCollapsed: setCollapsed,
+            };
+          };
+
+          if (document.readyState === "loading")
+            document.addEventListener("DOMContentLoaded", initExamTocDesktopToggle, {
+              once: true,
+            });
+          else
+            initExamTocDesktopToggle();
+        </script> <script>
+      var initHeaderPageTitle = function() {
+        var header = document.querySelector("[data-header-nav]");
+        if (!(header instanceof HTMLElement))
+          return;
+
+        var pageHeading = document.querySelector("[data-page-heading]");
+        if (
+          header.dataset.pageTitleEnabled !== "true" ||
+          !(pageHeading instanceof HTMLElement)
+        ) {
+          header.dataset.titleState = "site";
+          return;
+        }
+
+        var frame = null;
+        var syncHeaderTitleState = function() {
+          frame = null;
+          var headerHeight = header.getBoundingClientRect().height;
+          header.dataset.titleState =
+            pageHeading.getBoundingClientRect().top <= headerHeight
+              ? "page"
+              : "site";
+        };
+        var requestHeaderTitleStateSync = function() {
+          if (frame !== null)
+            return;
+          frame = window.requestAnimationFrame(syncHeaderTitleState);
+        };
+
+        syncHeaderTitleState();
+        window.addEventListener("scroll", requestHeaderTitleStateSync, {
+          passive: true,
+        });
+        window.addEventListener("resize", requestHeaderTitleStateSync);
+      };
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initHeaderPageTitle, {
+          once: true,
+        });
+      } else {
+        initHeaderPageTitle();
+      }
+    </script>  </body></html>

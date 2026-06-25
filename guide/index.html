@@ -1,0 +1,487 @@
+<!DOCTYPE html><html lang="zh"> <head><link rel="icon" type="image/svg+xml" href="/favicon.svg"><link rel="apple-touch-icon" type="image/svg+xml" href="/favicon.svg"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.44/dist/katex.min.css"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="generator" content="Astro v6.1.5"><meta name="description" content="BYR Docs 维基真题收录北京邮电大学近年试题，是一个开放、共建、共享的维基网站。"><meta name="keywords" content="北邮,北京邮电大学,考试题目,维基"><meta name="author" content="BYR Docs"><script>
+      const themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
+      const applyTheme = () => {
+        const resolvedTheme = themeMedia.matches ? "dark" : "light";
+        const isDark = resolvedTheme === "dark";
+        document.documentElement.classList.toggle("dark", isDark);
+        document.documentElement.style.colorScheme = resolvedTheme;
+      };
+      applyTheme();
+      themeMedia.addEventListener("change", applyTheme);
+    </script><script>
+      const examStateStorageKeyPrefix = "exam-state:";
+      const examStateTtlMs = 12 * 60 * 60 * 1000;
+      const examStateChangeEvent = "examstatechange";
+      const examStateSetAllEvent = "examsetall";
+      const createEmptyExamState = () => ({
+        blanks: {},
+        solutions: {},
+        choices: {},
+      });
+      const isRecord = (value) =>
+        value !== null && typeof value === "object" && !Array.isArray(value);
+      const normalizeChoiceState = (value) => ({
+        selected: Array.isArray(value?.selected)
+          ? value.selected.filter((item) => typeof item === "string")
+          : [],
+        revealed: value?.revealed === true,
+        mode:
+          value?.mode === "answers" || value?.mode === "checked"
+            ? value.mode
+            : undefined,
+      });
+      const normalizeExamState = (value) => {
+        const state = createEmptyExamState();
+        if (!isRecord(value)) return state;
+        if (isRecord(value.blanks))
+          state.blanks = Object.fromEntries(
+            Object.entries(value.blanks).filter(
+              ([, revealed]) => revealed === true,
+            ),
+          );
+        if (isRecord(value.solutions))
+          state.solutions = Object.fromEntries(
+            Object.entries(value.solutions).filter(([, open]) => open === true),
+          );
+        if (isRecord(value.choices))
+          state.choices = Object.fromEntries(
+            Object.entries(value.choices)
+              .map(([key, choiceState]) => [
+                key,
+                normalizeChoiceState(choiceState),
+              ])
+              .filter(
+                ([, choiceState]) =>
+                  choiceState.revealed === true ||
+                  choiceState.selected.length > 0,
+              ),
+          );
+        return state;
+      };
+      const isExamStateEmpty = (state) =>
+        Object.keys(state.blanks).length === 0 &&
+        Object.keys(state.solutions).length === 0 &&
+        Object.keys(state.choices).length === 0;
+      const getExamStateStorageKey = () =>
+        `${examStateStorageKeyPrefix}${window.location.pathname}`;
+      const removeExamState = () => {
+        try {
+          window.localStorage.removeItem(getExamStateStorageKey());
+        } catch {
+          return;
+        }
+      };
+      const readExamState = () => {
+        try {
+          const raw = window.localStorage.getItem(getExamStateStorageKey());
+          if (!raw) return createEmptyExamState();
+          const parsed = JSON.parse(raw);
+          if (
+            !isRecord(parsed) ||
+            typeof parsed.expiresAt !== "number" ||
+            parsed.expiresAt < Date.now()
+          ) {
+            removeExamState();
+            return createEmptyExamState();
+          }
+          return normalizeExamState(parsed);
+        } catch {
+          removeExamState();
+          return createEmptyExamState();
+        }
+      };
+      const writeExamState = (state) => {
+        const normalizedState = normalizeExamState(state);
+        if (isExamStateEmpty(normalizedState)) {
+          removeExamState();
+          return normalizedState;
+        }
+        try {
+          window.localStorage.setItem(
+            getExamStateStorageKey(),
+            JSON.stringify({
+              expiresAt: Date.now() + examStateTtlMs,
+              ...normalizedState,
+            }),
+          );
+        } catch {
+          return normalizedState;
+        }
+        return normalizedState;
+      };
+      const updateExamState = (updater) =>
+        writeExamState(updater(readExamState()) ?? createEmptyExamState());
+      const getRevealableExamChoiceGroups = () => [
+        ...document.querySelectorAll(".exam-choices[data-has-answer='true']"),
+      ];
+      const hasRevealable = () =>
+        document.querySelector(
+          ".exam-blank[aria-pressed], .exam-solution, .exam-choices[data-has-answer='true']",
+        ) !== null;
+      const getAllShown = () => {
+        if (!hasRevealable()) return false;
+        const blanks = [
+          ...document.querySelectorAll(".exam-blank[aria-pressed]"),
+        ];
+        const solutions = [...document.querySelectorAll(".exam-solution")];
+        const choiceGroups = getRevealableExamChoiceGroups();
+        return (
+          blanks.every(
+            (blank) => blank.getAttribute("aria-pressed") === "true",
+          ) &&
+          solutions.every(
+            (solution) =>
+              solution instanceof HTMLDetailsElement && solution.open,
+          ) &&
+          choiceGroups.every(
+            (group) => group.getAttribute("data-revealed") === "true",
+          )
+        );
+      };
+      const syncExamState = () =>
+        window.dispatchEvent(
+          new CustomEvent(examStateChangeEvent, {
+            detail: {
+              allShown: getAllShown(),
+              hasRevealable: hasRevealable(),
+            },
+          }),
+        );
+      const setAllRevealed = (revealed) =>
+        window.dispatchEvent(
+          new CustomEvent(examStateSetAllEvent, {
+            detail: { revealed },
+          }),
+        );
+      window.__examState = {
+        read: readExamState,
+        update: updateExamState,
+        sync: syncExamState,
+        toggleAll: () => setAllRevealed(!getAllShown()),
+        getAllShown,
+        hasRevealable,
+        events: {
+          change: examStateChangeEvent,
+          setAll: examStateSetAllEvent,
+        },
+      };
+    </script><title>BYR Docs 维基真题编辑指南 - BYR Docs 维基真题</title><link rel="stylesheet" href="/byrdocs-neowiki/_astro/exam.Dqi_d8wD.css">
+<link rel="stylesheet" href="/byrdocs-neowiki/_astro/Layout.B7MUkrao.css"></head> <body> <script>
+      document.addEventListener(
+        "click",
+        (e) => {
+          const a = e.target.closest("a[href]");
+          if (!a) return;
+          const href = a.getAttribute("href");
+          if (href && /^https?:\/\//.test(href)) {
+            a.setAttribute("target", "_blank");
+            a.setAttribute("rel", "noopener noreferrer");
+          }
+        },
+        true,
+      );
+    </script> <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        document.querySelectorAll(".astro-code").forEach((pre) => {
+          const wrapper = document.createElement("div");
+          wrapper.className = "code-block-wrapper";
+          pre.parentNode.insertBefore(wrapper, pre);
+          wrapper.appendChild(pre);
+
+          const toolbar = document.createElement("div");
+          toolbar.className = "code-toolbar";
+
+          const wrapBtn = document.createElement("button");
+          wrapBtn.type = "button";
+          wrapBtn.title = "切换自动换行";
+          wrapBtn.innerHTML =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M3 12h15a3 3 0 1 1 0 6h-4"/><polyline points="13 16 11 18 13 20"/><path d="M3 18h4"/></svg>';
+          wrapBtn.addEventListener("click", () => {
+            const isWrapped = pre.style.whiteSpace === "pre-wrap";
+            pre.style.whiteSpace = isWrapped ? "" : "pre-wrap";
+            pre.style.wordBreak = isWrapped ? "" : "break-all";
+            wrapBtn.style.color = isWrapped ? "" : "#4ade80";
+          });
+
+          const copyBtn = document.createElement("button");
+          copyBtn.type = "button";
+          copyBtn.title = "复制代码";
+          const copyIcon =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+          const checkIcon =
+            '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+          copyBtn.innerHTML = copyIcon;
+          copyBtn.addEventListener("click", () => {
+            const code = pre.querySelector("code");
+            const text = code ? code.textContent : pre.textContent;
+            navigator.clipboard.writeText(text || "").then(() => {
+              copyBtn.innerHTML = checkIcon;
+              copyBtn.classList.add("is-copied");
+              toolbar.classList.add("is-active");
+              setTimeout(() => {
+                copyBtn.innerHTML = copyIcon;
+                copyBtn.classList.remove("is-copied");
+                toolbar.classList.remove("is-active");
+              }, 2000);
+            });
+          });
+
+          toolbar.appendChild(wrapBtn);
+          toolbar.appendChild(copyBtn);
+          wrapper.appendChild(toolbar);
+        });
+      });
+    </script> <div class="layout-shell flex min-h-screen flex-col"> <nav class="relative border-b border-slate-200/80 bg-white/85 backdrop-blur dark:border-slate-800 dark:bg-slate-950/80 sticky top-0 z-40" data-header-nav data-page-title-enabled="true" data-title-state="site" data-astro-cid-3ef6ksr2> <div class="layout-container mx-auto flex w-full items-center gap-4 px-4 py-4 sm:px-6 lg:px-8" data-astro-cid-3ef6ksr2> <a class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white shadow-sm no-underline transition hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700" href="/" title="回到首页" data-astro-cid-3ef6ksr2> <img alt="BYR Docs" class="h-7 w-7" src="/favicon.svg" data-astro-cid-3ef6ksr2> </a> <div class="relative min-w-0 flex-1" data-astro-cid-3ef6ksr2> <a class="block truncate text-lg font-semibold tracking-tight text-slate-950 no-underline transition-[opacity,transform] duration-200 hover:text-slate-950 sm:text-2xl dark:text-white dark:hover:text-white" data-header-site-title href="/" data-astro-cid-3ef6ksr2>BYR Docs 维基真题</a> <span aria-hidden="true" class="pointer-events-none absolute inset-0 block truncate text-lg font-semibold tracking-tight text-slate-950 opacity-0 transition-[opacity,transform] duration-200 sm:text-2xl dark:text-white" data-header-page-title data-astro-cid-3ef6ksr2> BYR Docs 维基真题编辑指南 </span> </div> <a class="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 shadow-sm no-underline transition hover:border-slate-300 hover:text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-slate-700 dark:hover:text-slate-200" href="https://github.com/byrdocs/byrdocs-wiki-internal" aria-label="在 GitHub 上查看 BYR Docs 维基真题仓库" title="GitHub" target="_blank" rel="noopener noreferrer" data-astro-cid-3ef6ksr2> <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor" data-astro-cid-3ef6ksr2><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" data-astro-cid-3ef6ksr2></path></svg> </a> </div> </nav> <main class="layout-container mx-auto flex w-full flex-1 px-4 py-6 sm:px-6 lg:px-8 xl:px-16"> <article class="wiki-content min-w-0 flex-1"> <h1 data-page-heading>BYR Docs 维基真题编辑指南</h1>  
+<p>如果你已经对维基真题的编辑驾轻就熟，欢迎进行<a href="/test">自测</a>！</p>
+<hr/>
+<p>关于搭建本地开发环境的指引，请见<a href="https://github.com/byrdocs/byrdocs-neowiki/tree/master/README.md">项目 README</a>。</p>
+<h2 id="文件结构">文件结构</h2>
+<p>如果你是一般编辑者，文件结构中只有 <a href="https://github.com/byrdocs/byrdocs-neowiki/tree/master/exams">exams/</a> 一个目录是你需要关注的。该目录负责存放试题内容及其资源文件。每份试题都是一个文件夹，命名格式为 <strong>学年开始-学年结束-学期-科目-阶段（备注）</strong>，例如：</p>
+<ul>
+<li><strong>23-24-1-线性代数-期末（B卷）</strong> 因为本次考试的AB卷均收录于本维基，所以我们可以对其加注（A卷）或（B卷）加以区分。</li>
+<li><strong>23-24-2-高等数学A（下）-期末</strong> 注意科目要用全名，不要使用缩写。</li>
+<li><strong>24-25-1-英语听说2-期末</strong> 即便是英文试卷（包括国际学院的试卷），也要用中文名。</li>
+<li><strong>24-25-2-数字信号处理-期中</strong> 当存在歧义时，最先创建的页面可以不加备注，这是重名的先来后到原则。</li>
+<li><strong>24-25-2-数字信号处理-期中（信息与通信工程学院）</strong> 接下来出现的同名文件必须给予适当备注，以避免重名。</li>
+</ul>
+<p>试题正文应写入 <code>index.mdx</code>，连带题图、音频等资源文件放在试题文件夹中。资源文件名应描述其用途，例如：</p>
+<ul>
+<li><code>题图3.1.png</code></li>
+<li><code>解答4.svg</code></li>
+<li><code>听力音频.mp3</code></li>
+</ul>
+<p>如果你有意向对网站本身做出调整，请自行了解 <a href="https://docs.astro.build/en/getting-started/">Astro 文档</a>及本项目代码结构，也可加入<a href="https://qm.qq.com/cgi-bin/qm/qr?k=plu_KgkqxI4Dw-FwW1aFQDQ0hL062WNV&#38;jump_from=webapi&#38;authKey=09aiBE16MH9jTfmgmGtCjMRsvpazAMkvLcG35mdICYHe2+FKF51qqSIdUC0dVxkh">我们的 QQ 群</a>。</p>
+<h2 id="试题格式规范">试题格式规范</h2>
+<p><a href="https://github.com/byrdocs/byrdocs-neowiki/tree/master/exams">exams/</a> 的各 <code>index.mdx</code> 文件全部使用 <a href="https://mdxjs.com/">MDX 语言</a>，并包含本项目使用的自定义模块编写而成。它的学习成本低，上手容易，又能满足本维基的功能需求。</p>
+<p>为了保持试题代码结构的规范性和一致性，我们要求编辑者<strong>必须使用本维基指定组件和 Markdown 语法，不可以使用其它自定义组件、脚本及样式</strong>。因此，除指定组件外，其它代码应与 Markdown 语法一致。</p>
+<h3 id="前言">前言</h3>
+<p>前言描述了文档的元信息，必须置于文件开头。检查器会严格检查前言语法，所以请一定按照规范编写。</p>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8;overflow-x:auto" tabindex="0" data-language="md"><code><span class="line"><span style="color:#79B8FF;font-weight:bold">---</span></span>
+<span class="line"><span style="color:#E1E4E8">时间: 2024-2025学年第二学期</span></span>
+<span class="line"><span style="color:#E1E4E8">科目: 电路分析基础</span></span>
+<span class="line"><span style="color:#E1E4E8">阶段: 期中</span></span>
+<span class="line"><span style="color:#E1E4E8">类型: 本科</span></span>
+<span class="line"><span style="color:#E1E4E8">学院:</span></span>
+<span class="line"><span style="color:#FFAB70">-</span><span style="color:#E1E4E8"> 电子工程学院</span></span>
+<span class="line"><span style="color:#E1E4E8">答案完成度: 完整</span></span>
+<span class="line"><span style="color:#79B8FF;font-weight:bold">---</span></span></code></pre>
+<ul>
+<li>时间：<strong>xxxx-yyyy学年第[一/二]学期</strong>。</li>
+<li>阶段：<strong>期中</strong>或<strong>期末</strong>。</li>
+<li>类型：<strong>本科</strong>或<strong>研究生</strong>。</li>
+<li>科目：就是课程名。必须使用课程的中文全称，不得使用英文名、简称等。</li>
+<li>学院<sup>可选</sup>：必须是学院名，使用YAML格式的列表。如果缺少相关信息，可以留空。</li>
+<li>来源<sup>可选</sup>：填写 BYR Docs 主站相应文件的 md5 值（注意，字母要小写）。文件的 md5 可以在文件信息框的右下角复制得到。</li>
+<li>答案完成度<sup>可选</sup>：如果有完整的答案，且答案可靠，可以填为<strong>完整可靠</strong>；如果仅有答案，但不保证可靠，应填<strong>完整</strong>；如果答案残缺不全，应填<strong>残缺</strong>。</li>
+</ul>
+<h3 id="正文结构">正文结构</h3>
+<ul>
+<li>试题内容只需要呈现有效的试题部分，不要添加无关紧要的细节，如「考试注意事项」「打分表」等。</li>
+<li>除题图、听力音频等必要附件外，试题内容应全部使用<strong>符合维基真题规范的 MDX</strong> 语法录入，不允许以照片形式存储试题。</li>
+<li>每份试题的正文都应写在试题目录下的 <code>index.mdx</code> 中。如有题图、音频等资源文件，也应与它放在同一个试题目录下。</li>
+<li>大题使用二级标题，简答题小题使用三级标题，如：</li>
+</ul>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8;overflow-x:auto" tabindex="0" data-language="mdx"><code><span class="line"><span style="color:#79B8FF;font-weight:bold">## 二、简答题（每题10分，共40分）</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#79B8FF;font-weight:bold">### 1.</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">简述新民主主义的文化纲领。</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#79B8FF;font-weight:bold">### 2.</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">简述党在过渡时期的总路线。</span></span></code></pre>
+<ul>
+<li>但若同一个简答题的各个小题之间有共同关联，则不宜使用标题来划分，应直接使用列表来罗列小题，如：</li>
+</ul>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8;overflow-x:auto" tabindex="0" data-language="mdx"><code><span class="line"><span style="color:#79B8FF;font-weight:bold">## 五（18分）</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">一种蝙蝠通过发出度频声波进行回声定位，功能类似一个高通滤波器。请利用窗函数法设计线性相位 FIR 数字高通滤波器，要求：</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#9ECBFF">1</span><span style="color:#FFAB70">.</span><span style="color:#E1E4E8"> 阻带衰减不低于 $-48</span><span style="color:#79B8FF">\,</span><span style="color:#E1E4E8">\mathrm{dB}$，通带边缘频率 $f_p=3.5</span><span style="color:#79B8FF">\,</span><span style="color:#E1E4E8">\mathrm{kHz}$, 阻带边缘频率 $f</span><span style="color:#9ECBFF">_</span><span style="color:#E1E4E8">\text{stop}=3</span><span style="color:#79B8FF">\,</span><span style="color:#E1E4E8">\mathrm{kHz}$，取样频率 $</span><span style="color:#9ECBFF">_</span><span style="color:#E1E4E8">s=10</span><span style="color:#79B8FF">\,</span><span style="color:#E1E4E8">\mathrm{kHz}$。</span></span>
+<span class="line"><span style="color:#9ECBFF">2</span><span style="color:#FFAB70">.</span><span style="color:#E1E4E8"> 画出线性相位实现结构。</span></span></code></pre>
+<ul>
+<li>对于填空、选择、判断类题型，若滥用三级标题将不利于阅读，因此应使用列表，如：</li>
+</ul>
+<pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8;overflow-x:auto" tabindex="0" data-language="mdx"><code><span class="line"><span style="color:#79B8FF;font-weight:bold">## 三、判断题（每题 1 分，共 10 分）</span></span>
+<span class="line"><span style="color:#9ECBFF">1</span><span style="color:#FFAB70">.</span><span style="color:#E1E4E8"> 在自然语言处理中，Prompt提示技术可以用于改善模型对新任务的理解和执行能力。&lt;Blank /&gt;</span></span>
+<span class="line"><span style="color:#9ECBFF">2</span><span style="color:#FFAB70">.</span><span style="color:#E1E4E8"> 人工智能的核心目标是完全模仿人类行为。&lt;Blank /&gt;</span></span>
+<span class="line"><span style="color:#9ECBFF">3</span><span style="color:#FFAB70">.</span><span style="color:#E1E4E8"> 梯度下降算法是神经网络训练中的核心优化方法。&lt;Blank /&gt;</span></span></code></pre>
+<h3 id="维基真题指定组件">维基真题指定组件</h3>
+<p>为了最大限度保证维基真题站点功能、编写体验和对内容的兼容性，我们设计了以下组件。</p>
+<h4 id="blank-组件"><code>Blank</code> 组件</h4>
+<p><code>Blank</code> 组件常用于填空题中，作用是隐藏答案，只在用户点击时显示答案。</p>
+<div class="guide-example-grid"><div class="guide-example-panel guide-example-code"><div class="guide-example-panel-title">源代码</div><div class="guide-example-panel-body"><pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8;overflow-x:auto" tabindex="0" data-language="mdx"><code><span class="line"><span style="color:#9ECBFF">1</span><span style="color:#FFAB70">.</span><span style="color:#E1E4E8"> 本题的答案是 &lt;Blank&gt;答案&lt;/Blank&gt;。</span></span>
+<span class="line"><span style="color:#9ECBFF">2</span><span style="color:#FFAB70">.</span><span style="color:#E1E4E8"> 本题的答案是 &lt;Blank&gt;一段内容非常长的答案&lt;/Blank&gt;。</span></span>
+<span class="line"><span style="color:#9ECBFF">3</span><span style="color:#FFAB70">.</span><span style="color:#E1E4E8"> 下一题的答案是 &lt;Blank /&gt;。</span></span></code></pre></div></div><div class="guide-example-panel"><div class="guide-example-panel-title">预览</div><div class="guide-example-panel-body guide-example-preview"><ol>
+<li>本题的答案是 <button aria-pressed="false" class="exam-blank" type="button"><span aria-hidden="true" class="exam-blank-placeholder">
+【显示答案】
+</span><span class="exam-blank-answer">答案</span></button>。</li>
+<li>本题的答案是 <button aria-pressed="false" class="exam-blank" type="button"><span aria-hidden="true" class="exam-blank-placeholder">
+【显示答案】
+</span><span class="exam-blank-answer">一段内容非常长的答案</span></button>。</li>
+<li>下一题的答案是 <span class="exam-blank is-disabled">【暂无答案】</span><script type="module">const m=document.querySelectorAll(".exam-blank[aria-pressed]:not([data-exam-blank-ready])");m.forEach((e,c)=>{if(!(e instanceof HTMLButtonElement))return;e.setAttribute("data-exam-blank-ready","true");const r=`blank:${c}`,n=window.__examState,i=t=>{e.setAttribute("aria-pressed",t?"true":"false"),n?.update?.(s=>{const a={...s.blanks};return t?a[r]=!0:delete a[r],{...s,blanks:a}}),n?.sync?.()},l=e.querySelector(".exam-blank-placeholder"),o=e.querySelector(".exam-blank-answer");if(l instanceof HTMLElement&&o instanceof HTMLElement){const t=getComputedStyle(e),s=parseFloat(t.paddingLeft),a=parseFloat(t.paddingRight),u=o.getBoundingClientRect().width,p=l.scrollWidth,d=Math.max(0,p-(u+s+a))/2;d>0&&(e.style.paddingLeft=`${s+d}px`,e.style.paddingRight=`${a+d}px`)}n?.read?.().blanks?.[r]===!0&&e.setAttribute("aria-pressed","true"),e.addEventListener("click",()=>i(e.getAttribute("aria-pressed")!=="true")),window.addEventListener(n?.events?.setAll??"examsetall",t=>i(t instanceof CustomEvent&&t.detail?.revealed===!0)),n?.sync?.()});</script>。</li>
+</ol></div></div></div>
+<h4 id="slotchoices-和-option-组件"><code>Slot</code>、<code>Choices</code> 和 <code>Option</code> 组件</h4>
+<p><code>Slot</code> 和 <code>Choices</code> 组件常用于选择题中。前者的作用是简单地在题面中插入一个空位；后者的作用是提供答题框，当用户提交时可以检验答案。</p>
+<ul>
+<li><code>Slot</code> 和 <code>Choices</code> 都可以使用 <code>item</code> 属性加注题号，适用于多道题目共用同一题面的情况。</li>
+<li><code>Choices</code> 中的选择题默认为单选；如果是多选，需加注 <code>multiple</code> 属性。</li>
+<li>选项统一使用 <code>Option</code> 组件排布。A, B, C 等编号将按顺序自动生成，<strong>切勿手动添加编号</strong>。</li>
+<li><code>correct</code> 属性意味着这个 <code>Option</code> 是本题的正确答案；未加注 <code>correct</code> 的 <code>Option</code> 则意味着不是（或不知道）。如果一个 <code>Choices</code> 中没有任何带 <code>correct</code> 属性的 <code>Option</code>，则将本题视为暂无答案。</li>
+<li>为了简化语法，可以使用减号 <code>-</code> 引导的列表项来代替 <code>&lt;Option&gt;</code>，加号 <code>+</code> 引导的列表项来代替 <code>&lt;Option correct&gt;</code>，来定义一些选项。但请注意，这种语法的兼容性是有限的，对于复杂选项，还应使用 <code>&lt;Option&gt;</code> 语法。</li>
+</ul>
+<div class="guide-example-grid"><div class="guide-example-panel guide-example-code"><div class="guide-example-panel-title">源代码</div><div class="guide-example-panel-body"><pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8;overflow-x:auto" tabindex="0" data-language="mdx"><code><span class="line"><span style="color:#9ECBFF">1</span><span style="color:#FFAB70">.</span><span style="color:#E1E4E8"> 本题的答案是 &lt;Slot /&gt;。</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">&lt;Choices&gt;</span></span>
+<span class="line"><span style="color:#E1E4E8">    &lt;Option&gt;1&lt;/Option&gt;</span></span>
+<span class="line"><span style="color:#E1E4E8">    &lt;Option&gt;2&lt;/Option&gt;</span></span>
+<span class="line"><span style="color:#E1E4E8">    &lt;Option&gt;3&lt;/Option&gt;</span></span>
+<span class="line"><span style="color:#E1E4E8">&lt;/Choices&gt;</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">本题的答案先是 &lt;Slot item=&quot;2&quot; /&gt;，后是 &lt;Slot item=&quot;3&quot; /&gt;。</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">&lt;Choices item=&quot;2&quot; multiple&gt;</span></span>
+<span class="line"><span style="color:#E1E4E8">    + 1</span></span>
+<span class="line"><span style="color:#E1E4E8">    - 2</span></span>
+<span class="line"><span style="color:#E1E4E8">&lt;/Choices&gt;</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">&lt;Choices item=&quot;3&quot; multiple&gt;</span></span>
+<span class="line"><span style="color:#E1E4E8">    - 1</span></span>
+<span class="line"><span style="color:#E1E4E8">    + 2</span></span>
+<span class="line"><span style="color:#E1E4E8">&lt;/Choices&gt;</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#9ECBFF">4</span><span style="color:#FFAB70">.</span><span style="color:#E1E4E8"> 本题的答案是 &lt;Slot /&gt;。</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">&lt;Choices multiple&gt;</span></span>
+<span class="line"><span style="color:#E1E4E8">    + 是答案</span></span>
+<span class="line"><span style="color:#E1E4E8">    - 不是答案</span></span>
+<span class="line"><span style="color:#E1E4E8">    &lt;Option correct&gt;</span></span>
+<span class="line"><span style="color:#E1E4E8">        是答案是答案是答案</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">        是答案是答案是答案</span></span>
+<span class="line"><span style="color:#E1E4E8">    &lt;/Option&gt;</span></span>
+<span class="line"><span style="color:#E1E4E8">&lt;/Choices&gt;</span></span></code></pre></div></div><div class="guide-example-panel"><div class="guide-example-panel-title">预览</div><div class="guide-example-panel-body guide-example-preview"><ol>
+<li>本题的答案是 <span class="exam-slot">(  )</span>。</li>
+</ol><fieldset class="exam-choices single" data-multiple="false">  <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">1</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">2</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">3</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> <script type="module">const x=c=>String.fromCharCode(65+c),C=document.querySelectorAll(".exam-choices:not([data-exam-choices-ready])");C.forEach((c,S)=>{if(!(c instanceof HTMLFieldSetElement))return;c.setAttribute("data-exam-choices-ready","true");const b=c.getAttribute("data-multiple")==="true",i=[...c.querySelectorAll(".exam-choice-option")],r=c.querySelector(".exam-choices-submit"),d=i.some(e=>e.getAttribute("data-answer")==="true"),u=`choice:${S}`,o=window.__examState,y=`exam-choices-${S}`;if(c.setAttribute("data-has-answer",d?"true":"false"),c.setAttribute("data-revealed","false"),i.forEach((e,t)=>{const s=x(t);e.setAttribute("data-choice",s);const a=e.querySelector(".exam-choice-input"),n=e.querySelector(".exam-choice-letter");a instanceof HTMLInputElement&&(a.type=b?"checkbox":"radio",a.name=y,a.value=s),n&&(n.textContent=`${s}.`)}),!(r instanceof HTMLButtonElement))return;const h=()=>{i.forEach(e=>e.classList.remove("is-correct","is-wrong","is-missed")),r.classList.remove("is-all-correct","is-not-all-correct")},E=()=>i.flatMap(e=>{const t=e.querySelector(".exam-choice-input"),s=e.getAttribute("data-choice")??"";return t instanceof HTMLInputElement&&t.checked&&s?[s]:[]}),l=(e,t)=>{o?.update?.(s=>{const a={...s.choices},n=E();return!e&&n.length===0?delete a[u]:a[u]={selected:n,revealed:e,mode:e?t:void 0},{...s,choices:a}}),o?.sync?.()},L=e=>{const t=new Set(e);i.forEach(s=>{const a=s.querySelector(".exam-choice-input"),n=s.getAttribute("data-choice")??"";a instanceof HTMLInputElement&&(a.checked=t.has(n))})},v=()=>{h(),c.setAttribute("data-revealed","false"),c.removeAttribute("data-reveal-mode"),l(!1)},f=()=>{let e=!0;h(),i.forEach(t=>{const s=t.querySelector(".exam-choice-input"),a=t.getAttribute("data-answer")==="true",n=s instanceof HTMLInputElement&&s.checked;a?n?t.classList.add("is-correct"):(t.classList.add("is-missed"),e=!1):n&&(t.classList.add("is-wrong"),e=!1)}),r.classList.add(e?"is-all-correct":"is-not-all-correct"),c.setAttribute("data-revealed","true"),c.setAttribute("data-reveal-mode","checked"),l(!0,"checked")},m=()=>{h(),i.forEach(e=>{const t=e.querySelector(".exam-choice-input"),s=e.getAttribute("data-answer")==="true",a=t instanceof HTMLInputElement&&t.checked;s?e.classList.add("is-correct"):a&&e.classList.add("is-wrong")}),c.setAttribute("data-revealed","true"),c.setAttribute("data-reveal-mode","answers"),l(!0,"answers")},A=()=>{const e=o?.read?.().choices?.[u];e&&L(e.selected),!(!d||!e?.revealed)&&(e.mode==="answers"?m():f())},w=()=>{const e=c.getAttribute("data-reveal-mode");c.getAttribute("data-revealed")!=="true"?l(!1):e==="answers"?m():f()};if(!d){r.disabled=!0,r.textContent="暂无答案",A(),i.forEach(e=>{const t=e.querySelector(".exam-choice-input");t instanceof HTMLInputElement&&t.addEventListener("change",()=>l(!1))}),o?.sync?.();return}A(),i.forEach(e=>{const t=e.querySelector(".exam-choice-input");t instanceof HTMLInputElement&&t.addEventListener("change",w)}),r.addEventListener("click",f),window.addEventListener(o?.events?.setAll??"examsetall",e=>{e instanceof CustomEvent&&e.detail?.revealed===!0?m():v()}),o?.sync?.()});</script><p>本题的答案先是 <span class="exam-slot">(2)</span>，后是 <span class="exam-slot">(3)</span>。</p><fieldset aria-label="第 2 题选项" class="exam-choices multiple" data-multiple="true"> <div class="exam-choices-item">第 2 题</div> <div class="exam-choices-options"> <label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">1</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">2</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> <fieldset aria-label="第 3 题选项" class="exam-choices multiple" data-multiple="true"> <div class="exam-choices-item">第 3 题</div> <div class="exam-choices-options"> <label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">1</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">2</div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> <ol start="4">
+<li>本题的答案是 <span class="exam-slot">(  )</span>。</li>
+</ol><fieldset class="exam-choices multiple" data-multiple="true">  <div class="exam-choices-options"> <label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">是答案</div> </label><label class="exam-choice-option"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content">不是答案</div> </label><label class="exam-choice-option" data-answer="true"> <input class="exam-choice-input" type="radio"> <span aria-hidden="true" class="exam-choice-indicator"></span> <span aria-hidden="true" class="exam-choice-letter"></span> <div class="exam-choice-content"><p>是答案是答案是答案</p><p>是答案是答案是答案</p></div> </label> </div> <button class="exam-choices-submit" type="button">检查</button> </fieldset> </div></div></div>
+<h4 id="solution-组件"><code>Solution</code> 组件</h4>
+<p><code>Solution</code> 组件常用于解答题中，作用是隐藏大段答案，用户可以展开查看；当然也可以用于其它题型中，作用是在简单的答案之外提供解析。</p>
+<p>对于没有答案/解析的题目，不要滥用 <code>Solution</code> 组件，因为读者在点开它之前不知道本题是没有答案/解析的。</p>
+<div class="guide-example-grid"><div class="guide-example-panel guide-example-code"><div class="guide-example-panel-title">源代码</div><div class="guide-example-panel-body"><pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8;overflow-x:auto" tabindex="0" data-language="mdx"><code><span class="line"><span style="color:#E1E4E8">&lt;Solution&gt;</span></span>
+<span class="line"><span style="color:#E1E4E8">    Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</span></span>
+<span class="line"><span style="color:#E1E4E8">&lt;/Solution&gt;</span></span></code></pre></div></div><div class="guide-example-panel"><div class="guide-example-panel-title">预览</div><div class="guide-example-panel-body guide-example-preview"><details class="exam-solution"> <summary class="exam-solution-summary"> <span class="exam-solution-summary-main"> <span class="exam-solution-summary-icon" aria-hidden="true">›</span> <span>答案 / 解析</span> </span> <span class="exam-solution-summary-hint" aria-hidden="true"></span> </summary> <div class="exam-solution-content"> <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p> </div> </details> <script type="module">const l=document.querySelectorAll(".exam-solution:not([data-exam-solution-ready])");l.forEach((e,a)=>{if(!(e instanceof HTMLDetailsElement))return;e.setAttribute("data-exam-solution-ready","true");const s=`solution:${a}`,n=window.__examState,r=()=>{n?.update?.(o=>{const t={...o.solutions};return e.open?t[s]=!0:delete t[s],{...o,solutions:t}}),n?.sync?.()};n?.read?.().solutions?.[s]===!0&&(e.open=!0),e.addEventListener("toggle",r),window.addEventListener(n?.events?.setAll??"examsetall",o=>{const t=o instanceof CustomEvent&&o.detail?.revealed===!0;e.open!==t&&(e.open=t)}),n?.sync?.()});</script></div></div></div>
+<h4 id="figure-组件"><code>Figure</code> 组件</h4>
+<p><code>Figure</code> 组件用于显示图片，支持斥文嵌入和串文旁置。</p>
+<ul>
+<li>在试题页中，图片来源 <code>src</code> 应填写<strong>当前试题目录内的相对文件名</strong>，例如 <code>题图3.1.png</code>。</li>
+<li>图片默认使用斥文嵌入；如需串文旁置，请加注 <code>float</code> 属性。</li>
+<li>题图应尽量使用白色背景，如果图片是透明的，会默认加上白色背景层。如需强制保持透明背景，请加注 <code>transparent</code> 属性。</li>
+<li>组件内填写图片标题；如果留空，则代表没有图片标题。（建议只在串文旁置时使用图片标题）</li>
+</ul>
+<div class="guide-example-grid"><div class="guide-example-panel guide-example-code"><div class="guide-example-panel-title">源代码</div><div class="guide-example-panel-body"><pre class="astro-code github-dark" style="background-color:#24292e;color:#e1e4e8;overflow-x:auto" tabindex="0" data-language="mdx"><code><span class="line"><span style="color:#E1E4E8">favicon.svg 是一个无背景图片，而在维基真题中，无背景图片将默认使用白色背景。</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">&lt;Figure src=&quot;favicon.svg&quot; float&gt;</span></span>
+<span class="line"><span style="color:#E1E4E8">    BYR Docs 维基真题</span></span>
+<span class="line"><span style="color:#E1E4E8">&lt;/Figure&gt;</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">比如右侧这张串文旁置的插图，当你点开放大时，它的背景是白色的。在多数情况下，使用白色背景，可以让读者得到符合预期的阅读效果。</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">&lt;Figure src=&quot;favicon.svg&quot; transparent /&gt;</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#E1E4E8">当然这种效果也会有不如意的时候。如果你的确想让它保持透明，不妨使用 </span><span style="color:#9ECBFF">`</span><span style="color:#79B8FF">transparent</span><span style="color:#9ECBFF">`</span><span style="color:#E1E4E8">，就像上面这张斥文嵌入的图片那样。</span></span></code></pre></div></div><div class="guide-example-panel"><div class="guide-example-panel-title">预览</div><div class="guide-example-panel-body guide-example-preview"><p>favicon.svg 是一个无背景图片，而在维基真题中，无背景图片将默认使用白色背景。</p><figure class="exam-figure exam-figure-float" data-exam-figure data-exam-figure-alt="题图" data-exam-figure-src="favicon.svg" style="--exam-figure-background: white;"> <button aria-label="预览图片" class="exam-figure-trigger" data-exam-figure-trigger type="button"> <span class="exam-figure-media"> <img alt="题图" class="exam-figure-image" data-exam-figure-image loading="lazy" src="/byrdocs-neowiki/guide/favicon.svg"> <span aria-hidden="true" class="exam-figure-missing"> <span class="exam-figure-missing-title">图片暂缺</span> <code class="exam-figure-missing-meta" data-exam-figure-missing-meta>favicon.svg</code> </span> </span> </button> <figcaption class="exam-figure-caption"><p>BYR Docs 维基真题</p></figcaption> <dialog aria-label="图片预览" class="exam-figure-dialog" data-exam-figure-dialog> <div class="exam-figure-dialog-panel"> <div class="exam-figure-dialog-media"> <div aria-label="题图" class="exam-figure-dialog-svg-container" data-exam-figure-svg-container data-src="/byrdocs-neowiki/guide/favicon.svg" role="img"></div> <div class="exam-figure-dialog-fallback" data-exam-figure-dialog-fallback hidden> <p class="exam-figure-dialog-fallback-title">图片暂缺</p> <code class="exam-figure-dialog-fallback-meta" data-exam-figure-missing-meta>favicon.svg</code> </div> </div> <div class="exam-figure-dialog-caption"><p>BYR Docs 维基真题</p></div> </div> </dialog> </figure> <p>比如右侧这张串文旁置的插图，当你点开放大时，它的背景是白色的。在多数情况下，使用白色背景，可以让读者得到符合预期的阅读效果。</p><figure class="exam-figure" data-exam-figure data-exam-figure-alt="favicon.svg" data-exam-figure-src="favicon.svg" style="--exam-figure-background: transparent;"> <button aria-label="预览图片" class="exam-figure-trigger" data-exam-figure-trigger type="button"> <span class="exam-figure-media"> <img alt="favicon.svg" class="exam-figure-image" data-exam-figure-image loading="lazy" src="/byrdocs-neowiki/guide/favicon.svg"> <span aria-hidden="true" class="exam-figure-missing"> <span class="exam-figure-missing-title">图片暂缺</span> <code class="exam-figure-missing-meta" data-exam-figure-missing-meta>favicon.svg</code> </span> </span> </button>  <dialog aria-label="图片预览" class="exam-figure-dialog" data-exam-figure-dialog> <div class="exam-figure-dialog-panel"> <div class="exam-figure-dialog-media"> <div aria-label="favicon.svg" class="exam-figure-dialog-svg-container" data-exam-figure-svg-container data-src="/byrdocs-neowiki/guide/favicon.svg" role="img"></div> <div class="exam-figure-dialog-fallback" data-exam-figure-dialog-fallback hidden> <p class="exam-figure-dialog-fallback-title">图片暂缺</p> <code class="exam-figure-dialog-fallback-meta" data-exam-figure-missing-meta>favicon.svg</code> </div> </div>  </div> </dialog> </figure> <script type="module">const x=document.querySelectorAll(".exam-figure[data-exam-figure]:not([data-exam-figure-ready])");x.forEach(a=>{a.setAttribute("data-exam-figure-ready","true");const d=a.querySelector("[data-exam-figure-trigger]"),n=a.querySelector("[data-exam-figure-dialog]"),c=a.querySelector("[data-exam-figure-image]"),s=a.querySelector("[data-exam-figure-dialog-image]"),l=a.querySelector("[data-exam-figure-dialog-fallback]"),h=a.querySelectorAll("[data-exam-figure-missing-meta]"),t=a.querySelector("[data-exam-figure-svg-container]");if(!(d instanceof HTMLButtonElement)||!(n instanceof HTMLDialogElement))return;const o=()=>{l instanceof HTMLDivElement&&(l.hidden=!1),t instanceof HTMLDivElement&&(t.hidden=!0),s instanceof HTMLImageElement&&(s.hidden=!0)},u=()=>{a.setAttribute("data-state","missing"),d.setAttribute("aria-disabled","true"),d.setAttribute("aria-label",`图片缺失：${a.getAttribute("data-exam-figure-src")??"未知文件"}`),o()},g=()=>{if(!(t instanceof HTMLDivElement))return;const i=t.querySelector("svg");if(i instanceof SVGSVGElement)try{const e=i.getBBox();if(e.width<=0||e.height<=0)return;i.setAttribute("viewBox",`${e.x} ${e.y} ${e.width} ${e.height}`);const m=window.innerWidth*.92,f=window.innerHeight*.88,r=Math.min(m/e.width,f/e.height);t.style.width=`${e.width*r}px`,t.style.height=`${e.height*r}px`}catch{}},v=async()=>{if(!(t instanceof HTMLDivElement))return;if(t.getAttribute("data-ready")==="true"){g();return}const i=t.getAttribute("data-src");if(i)try{const e=await fetch(i);if(!e.ok)return o();const m=await e.text(),r=new DOMParser().parseFromString(m,"image/svg+xml").documentElement;if(!(r instanceof SVGSVGElement))return o();t.hidden=!1,l instanceof HTMLDivElement&&(l.hidden=!0),t.style.width="",t.style.height="",r.classList.add("exam-figure-dialog-svg"),r.removeAttribute("width"),r.removeAttribute("height"),r.setAttribute("preserveAspectRatio","xMidYMid meet"),t.replaceChildren(r),t.setAttribute("data-ready","true"),requestAnimationFrame(()=>requestAnimationFrame(g))}catch{o()}};if(c instanceof HTMLImageElement&&(c.complete&&c.naturalWidth===0?u():c.addEventListener("error",u,{once:!0})),s instanceof HTMLImageElement){const i=()=>o();s.complete&&s.naturalWidth===0?i():s.addEventListener("error",i,{once:!0})}h.forEach(i=>{i.addEventListener("click",e=>e.stopPropagation())}),d.addEventListener("click",()=>{a.getAttribute("data-state")!=="missing"&&(n.open||n.showModal(),v())}),n.addEventListener("click",i=>{i.target===n&&n.close()}),window.addEventListener("resize",()=>{n.open&&g()})});</script><p>当然这种效果也会有不如意的时候。如果你的确想让它保持透明，不妨使用 <code>transparent</code>，就像上面这张斥文嵌入的图片那样。</p></div></div></div>  </article> </main> <div class="floating-toolbar" id="pageToolbar" data-expanded="false"><div class="floating-toolbar-actions" id="pageToolbarActions"><button class="floating-toolbar-control cursor-pointer transition-opacity active:scale-95" id="pageBackToTop" type="button" aria-label="回到顶部" data-tooltip="回到顶部" data-toolbar-action><svg aria-hidden="true" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6"></path></svg></button><a class="no-underline floating-toolbar-control active:scale-95" href="https://github.com/byrdocs/byrdocs-neowiki/edit/master/src/guide/index.mdx" aria-label="在 GitHub 上编辑" data-tooltip="在 GitHub 上编辑" data-toolbar-action><svg aria-hidden="true" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="m16.5 3.5 4 4L8 20l-5 1 1-5 12.5-12.5Z"></path></svg></a></div><button class="floating-toolbar-control floating-toolbar-toggle cursor-pointer active:scale-95" id="pageToolbarToggle" type="button" aria-label="展开工具栏" aria-expanded="false" aria-controls="pageToolbarActions" data-tooltip="展开工具栏"><svg aria-hidden="true" class="h-5 w-5" data-toolbar-toggle-icon="open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"></path><path d="M5 12h14"></path></svg><svg aria-hidden="true" class="h-5 w-5" data-toolbar-toggle-icon="close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 6-12 12"></path><path d="M6 6l12 12"></path></svg></button></div><script>
+  var pageToolbar = document.getElementById("pageToolbar");
+  var pageToolbarToggle = document.getElementById("pageToolbarToggle");
+  var pageBackToTop = document.getElementById("pageBackToTop");
+  var setPageToolbarExpanded = function(expanded) {
+    if (!(pageToolbar instanceof HTMLElement)) return;
+    pageToolbar.dataset.expanded = expanded ? "true" : "false";
+    if (pageToolbarToggle instanceof HTMLButtonElement) {
+      pageToolbarToggle.setAttribute("aria-expanded", String(expanded));
+      pageToolbarToggle.setAttribute(
+        "aria-label",
+        expanded ? "收起工具栏" : "展开工具栏",
+      );
+      pageToolbarToggle.dataset.tooltip = expanded ? "收起工具栏" : "展开工具栏";
+    }
+  };
+
+  setPageToolbarExpanded(false);
+  pageToolbarToggle?.addEventListener("click", function(event) {
+    event.stopPropagation();
+    setPageToolbarExpanded(pageToolbar?.dataset.expanded !== "true");
+  });
+  pageToolbar?.querySelectorAll("[data-toolbar-action]").forEach(function(control) {
+    control.addEventListener("click", function() {
+      setPageToolbarExpanded(false);
+    });
+  });
+  document.addEventListener("click", function(event) {
+    if (!(pageToolbar instanceof HTMLElement) || pageToolbar.dataset.expanded !== "true")
+      return;
+    if (pageToolbar.contains(event.target))
+      return;
+    setPageToolbarExpanded(false);
+  });
+  document.addEventListener("keydown", function(event) {
+    if (event.key === "Escape")
+      setPageToolbarExpanded(false);
+  });
+
+  var updatePageBackToTopVisibility = function() {
+    if (!pageBackToTop) return;
+    pageBackToTop.classList.toggle("is-visible", window.scrollY > 200);
+  };
+
+  updatePageBackToTopVisibility();
+  window.addEventListener("scroll", updatePageBackToTopVisibility, { passive: true });
+  pageBackToTop?.addEventListener("click", function() {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+</script> <footer class="mt-10 border-t border-slate-200/80 bg-white/70 dark:border-slate-800 dark:bg-slate-950/70"> <div class="mx-auto flex w-full max-w-6xl flex-col items-center gap-3 px-4 py-5 sm:px-6 lg:px-8"> <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-sm text-slate-500 dark:text-slate-400"> <a class="no-underline text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200" href="https://github.com/byrdocs">GitHub</a> <span class="text-slate-300 dark:text-slate-700">·</span> <a class="no-underline text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200" href="https://byrdocs.org">BYR Docs</a> <span class="text-slate-300 dark:text-slate-700">·</span> <a class="no-underline text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200" href="https://qm.qq.com/cgi-bin/qm/qr?k=plu_KgkqxI4Dw-FwW1aFQDQ0hL062WNV&jump_from=webapi&authKey=09aiBE16MH9jTfmgmGtCjMRsvpazAMkvLcG35mdICYHe2+FKF51qqSIdUC0dVxkh">QQ 群</a> </div> <p class="m-0 text-center text-xs text-slate-400 dark:text-slate-500">
+除非另有声明，本网站内容采用 <a class="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300" href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a> 授权。
+</p> </div> </footer> </div>  <script>
+      var initHeaderPageTitle = function() {
+        var header = document.querySelector("[data-header-nav]");
+        if (!(header instanceof HTMLElement))
+          return;
+
+        var pageHeading = document.querySelector("[data-page-heading]");
+        if (
+          header.dataset.pageTitleEnabled !== "true" ||
+          !(pageHeading instanceof HTMLElement)
+        ) {
+          header.dataset.titleState = "site";
+          return;
+        }
+
+        var frame = null;
+        var syncHeaderTitleState = function() {
+          frame = null;
+          var headerHeight = header.getBoundingClientRect().height;
+          header.dataset.titleState =
+            pageHeading.getBoundingClientRect().top <= headerHeight
+              ? "page"
+              : "site";
+        };
+        var requestHeaderTitleStateSync = function() {
+          if (frame !== null)
+            return;
+          frame = window.requestAnimationFrame(syncHeaderTitleState);
+        };
+
+        syncHeaderTitleState();
+        window.addEventListener("scroll", requestHeaderTitleStateSync, {
+          passive: true,
+        });
+        window.addEventListener("resize", requestHeaderTitleStateSync);
+      };
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", initHeaderPageTitle, {
+          once: true,
+        });
+      } else {
+        initHeaderPageTitle();
+      }
+    </script>  </body></html>
